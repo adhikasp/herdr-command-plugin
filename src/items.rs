@@ -54,6 +54,8 @@ pub struct Item {
     pub command: Option<Vec<String>>,
     /// The key bound to a command row in herdr's config, shown at its right.
     pub binding: String,
+    /// The saved SSH machine the row lives on; None for the local session.
+    pub machine: Option<String>,
 }
 
 pub struct ItemInit {
@@ -125,7 +127,22 @@ impl Item {
             detail_field,
             command: None,
             binding: String::new(),
+            machine: None,
         }
+    }
+
+    /// Move the row to a saved SSH machine: its key and label carry the
+    /// machine's name, and the name is searchable.
+    pub fn on_machine(&mut self, machine: &str) {
+        self.key = format!("{}/{}", machine, self.key);
+        if self.kind == KIND_SPACE {
+            self.title = format!("{}/{}", machine, self.title);
+        } else {
+            self.workspace_label = format!("{}/{}", machine, self.workspace_label);
+        }
+        self.fields.push(machine.to_string());
+        self.prepared.push(Prepared::new(machine));
+        self.machine = Some(machine.to_string());
     }
 
     /// Stop matching a field (never the title) while the row still shows it.

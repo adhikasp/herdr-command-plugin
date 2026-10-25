@@ -173,6 +173,14 @@ pub fn main(args: Vec<String>) -> i32 {
         return open_bar();
     }
 
+    if has("--watch-machines") {
+        return crate::remote::run_daemon();
+    }
+    if has("--start-machines") {
+        crate::remote::ensure_daemon();
+        return 0;
+    }
+
     if has("--start-titles") || has("--watch-titles") || has("--stop-titles") {
         if args[0] == "--watch-titles" {
             let Some(token) = args.get(1) else {
@@ -259,6 +267,7 @@ pub fn main(args: Vec<String>) -> i32 {
     // rows one by one would only delay the exit (Bar owns nothing to flush).
     let mut bar = std::mem::ManuallyDrop::new(Bar::new(client, config, Recents::new(None), theme));
     std::mem::swap(&mut bar.recents, &mut recents);
+    bar.watch_machines();
     if let Err(error) = bar.bootstrap(pool, answer) {
         return fail(&error.message);
     }

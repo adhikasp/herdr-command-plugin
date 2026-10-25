@@ -54,6 +54,10 @@ command = ["bin/herdr-command-plugin"]
 [[startup]]
 command = ["bin/herdr-command-plugin", "--start-titles"]
 
+# Keeps the saved SSH machines' spaces, tabs and agents fresh for the bar.
+[[startup]]
+command = ["bin/herdr-command-plugin", "--start-machines"]
+
 [[events]]
 on = "pane.agent_detected"
 command = ["bin/herdr-command-plugin", "--start-titles"]

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Spaces, tabs and agents on your saved SSH machines (`herdr machine add`) show
+  up in the list as `machine/name` and are searchable by machine. A background
+  process, started with the plugin, keeps them fresh in a cache, so they are
+  there the moment the bar opens.
+- Enter on one of them focuses it on that machine and switches the window to
+  it by pressing the sidebar keys (`prefix+w`, move, Enter) with `wtype`.
+  Needs a Wayland desktop with `wtype`; renaming and closing stay local-only.
+
 ## 0.14.0
 
 - A calmer list. Every row has the same columns: a kind column (agent logo,

@@ -296,6 +296,9 @@ pub struct Bar {
     list_top: isize,
     list_height: isize,
     painter: Painter,
+    /// Rows from the saved SSH machines, once `watch_machines` is called.
+    remote: Option<crate::remote::Remote>,
+    remote_seen: u64,
 }
 
 impl Bar {
@@ -343,7 +346,31 @@ impl Bar {
             list_top: 2,
             list_height: 10,
             painter: Painter::new(),
+            remote: None,
+            remote_seen: 0,
         }
+    }
+
+    /// Show the spaces, tabs and agents of the saved SSH machines too.
+    pub fn watch_machines(&mut self) {
+        self.remote = Some(crate::remote::Remote::start());
+        let keep = if self.rows.is_empty() { None } else { Some(self.selected_item().key.clone()) };
+        self.merge_remote();
+        self.rebuild(keep);
+    }
+
+    /// Swap the machines' rows into the pool, right after the local ones.
+    fn merge_remote(&mut self) {
+        let Some(remote) = &self.remote else { return };
+        let (version, rows) = remote.rows();
+        self.remote_seen = version;
+        let pane_rows = self.command_start - self.item_count;
+        let mut kept: Vec<Item> = self.pool.drain(..self.item_count).filter(|item| item.machine.is_none()).collect();
+        kept.extend(rows);
+        self.item_count = kept.len();
+        self.command_start = self.item_count + pane_rows;
+        kept.append(&mut self.pool);
+        self.pool = kept;
     }
 
     pub fn items(&self) -> &[Item] {
@@ -374,6 +401,15 @@ impl Bar {
     }
 
     pub fn refresh(&mut self, force: bool) {
+        self.refresh_local(force);
+        if self.remote.as_ref().map(|r| r.version()).is_some_and(|v| v != self.remote_seen) {
+            let keep = if self.rows.is_empty() { None } else { Some(self.selected_item().key.clone()) };
+            self.merge_remote();
+            self.rebuild(keep);
+        }
+    }
+
+    fn refresh_local(&mut self, force: bool) {
         match self.client.snapshot_since(&mut self.snapshot_answer) {
             Ok(Some(snapshot)) => {
                 self.apply(&snapshot, force);
@@ -417,6 +453,7 @@ impl Bar {
         self.command_start = pool.command_start;
         let old = std::mem::replace(&mut self.pool, pool.items);
         crate::par::drop_aside(old, self.pool.len() >= crate::par::MIN_PARALLEL);
+        self.merge_remote();
         self.last_refresh = monotonic();
         self.rebuild(if force { None } else { keep });
     }
@@ -838,6 +875,10 @@ impl Bar {
         }
         let item = self.selected_item();
         let tab_id = item.tab_id.clone().filter(|t| !t.is_empty());
+        if item.machine.is_some() {
+            self.flash("tabs on other machines can't be renamed from here");
+            return;
+        }
         if item.kind == KIND_PANE || item.kind == KIND_SPACE || tab_id.is_none() {
             self.flash("only tabs and agents can be renamed");
             return;
@@ -988,6 +1029,10 @@ impl Bar {
         }
         let item = self.selected_item();
         let tab_id = item.tab_id.clone().filter(|t| !t.is_empty());
+        if item.machine.is_some() {
+            self.flash("tabs on other machines can't be closed from here");
+            return;
+        }
         if item.kind == KIND_PANE || item.kind == KIND_SPACE || tab_id.is_none() {
             self.flash("only tabs and agents can be closed");
             return;
@@ -1566,6 +1611,33 @@ impl Bar {
 
 /// Focus whatever the row points at. A workspace row opens a new tab there.
 pub fn jump(client: &mut HerdrClient, item: &Item) -> Result<()> {
+    if let Some(machine) = item.machine.as_deref() {
+        // Each focus is an SSH round trip, so they run on after the popup
+        // closes instead of holding it open.
+        let mut focus: Vec<(&str, &str)> = Vec::new();
+        if item.kind == KIND_SPACE {
+            focus.push(("workspace", item.workspace_id.as_str()));
+        } else {
+            if let Some(tab_id) = item.tab_id.as_deref().filter(|t| !t.is_empty()) {
+                focus.push(("tab", tab_id));
+            }
+            if let Some(pane_id) = item.pane_id.as_deref().filter(|p| !p.is_empty()).filter(|_| item.kind == KIND_AGENT) {
+                focus.push(("agent", pane_id));
+            }
+        }
+        crate::remote::focus_in_background(&client.bin_path, machine, &focus);
+        // And the window follows.
+        let snapshot = client.snapshot()?;
+        let local: Vec<String> = snapshot
+            .get("workspaces")
+            .list_or_empty()
+            .iter()
+            .filter_map(|w| w.get("workspace_id").as_str().map(str::to_string))
+            .collect();
+        let focused = snapshot.get("focused_workspace_id").as_str().unwrap_or("").to_string();
+        crate::remote::show_machine(machine, &item.workspace_id, &local, &focused, &crate::remote::prefix_key());
+        return Ok(());
+    }
     if item.kind == KIND_SPACE {
         return client.create_tab(&item.workspace_id);
     }

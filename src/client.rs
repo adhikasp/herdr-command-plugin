@@ -162,7 +162,7 @@ impl HerdrClient {
         pyjson::loads(&text).map_err(|_| Transport::Value)
     }
 
-    fn cli(&self, args: &[String]) -> Result<Value> {
+    pub fn cli(&self, args: &[String]) -> Result<Value> {
         let mut argv = vec![self.bin_path.clone()];
         argv.extend(args.iter().cloned());
         let joined = args.join(" ");
@@ -242,7 +242,7 @@ impl HerdrClient {
         HerdrClient::snapshot_of(result)
     }
 
-    fn snapshot_of(mut result: Map) -> Result<Value> {
+    pub fn snapshot_of(mut result: Map) -> Result<Value> {
         match result.remove("snapshot") {
             Some(snapshot @ Value::Dict(_)) => Ok(snapshot),
             _ => Err(HerdrError::new("session snapshot missing from response")),

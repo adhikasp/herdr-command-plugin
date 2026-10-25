@@ -18,6 +18,7 @@ mod opener;
 mod paint;
 mod par;
 mod proc;
+mod remote;
 #[cfg(all(test, unix))]
 mod probe;
 mod pyjson;
