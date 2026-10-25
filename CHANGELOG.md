@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0
 
 - Spaces, tabs and agents on your saved SSH machines (`herdr machine add`) show
   up in the list as `machine/name` and are searchable by machine. A background
