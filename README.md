@@ -1,63 +1,47 @@
-# herdr-command-plugin — Cmd+K for Herdr: jump anywhere, run anything
+# herdr-command-plugin
 
 [![ci](https://github.com/adhikasp/herdr-command-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/adhikasp/herdr-command-plugin/actions/workflows/ci.yml)
 
-**A [Herdr](https://herdr.dev) command bar.** Press Cmd+K and type: spaces,
-tabs, agents, named panes and commands are one fuzzy list. A short prefix
-narrows it (`s pilf` is the `pi-life` space, `c split` the split commands), and
-Enter jumps there or runs it. Like Raycast or the Slack quick switcher, for the
-terminal.
+**Cmd+K for [Herdr](https://herdr.dev): jump anywhere, run anything.**
 
 ![Herdr command bar: fuzzy search across spaces, agents and commands, kind prefixes, and the command palette](assets/demo.gif)
 
-- **one search for everything** — spaces, tabs, agents, named panes and
-  commands in one list. At rest it shows the places you can jump to; once you
-  type, commands join in, ranked after places for one- and two-letter queries.
-- **kind prefixes** — `s`, `a`, `t`, `p` and `c` (or `space:`, `agent:`, `cmd:`)
-  keep the search to spaces, agents, tabs, panes or commands, and the chip says
-  which. A prefix that matches nothing widens back to everything.
-- **command palette** — `>` or `c ` lists herdr's own actions (split, zoom,
-  close, focus, new tab or workspace, reload config) and every plugin action,
-  with the key bound to each.
-- **modal mode** — optional vim-style list: `j`/`k` move, and typing anything
-  else starts the search.
-- **automatic titles for unnamed tabs** — follows Claude and Codex task titles to
-  replace default tab numbers with the task title. Existing tab names, named
-  panes and named agents stay yours, including names set by another plugin.
-  Enabled by default when no competing naming plugin is detected.
-- **recognizable agent icons** — Claude, Codex, Pi, Grok, Kimi, Gemini, Cursor
-  and OpenCode have distinct marks and colors. With the Herdr Agent Icons Max
-  font installed, vendor logos lead each agent row, as shown in the demo.
-- **optional status in the tab bar** — agent tabs lead with their logo and status,
-  updated only when the status changes.
-- **live status, herdr's own language** — `◉` needs you, `◐` working,
-  `●` done, `✓` idle. Colors and glyphs mirror the herdr sidebar, and the list
-  keeps updating while it is open.
-- **named panes on demand** — `%` switches to one row per pane, led by the
-  name you assigned it, and Enter focuses that exact pane.
-- **opens on what matters** — blocked and finished agents float to the top,
-  recently visited rows above them, and the tab you are in is never first, so
-  open-then-Enter works like alt-tab.
-- **running time on every row** — how long the agent session, or whatever the
-  tab is running, has been up: `47s`, `12m`, `2h04m`, `4d3h`.
-- **live preview** — the right column tails the selected pane, so you can look
-  before you leap.
-- **closes tabs** — `⌦` on a row closes its tab once you confirm, so the
-  session you are looking at is the session you can tidy.
-- **one small native binary** — written in Rust, no runtime to install. Herdr
-  downloads the prebuilt binary for your platform when it installs the plugin.
-  On a session with 2,000 rows, the first frame takes about 24 ms and a
-  keystroke about 10 ms (p99). A small background watcher runs when tab
-  updates are enabled.
+A dozen agents across five spaces gets hard to keep track of. Press one key and
+your whole session becomes a single fuzzy list: every space, tab, agent, named
+pane and command. Type a few letters, hit Enter, you're there. Think Raycast,
+the Slack quick switcher or VS Code's Cmd+P, for a terminal full of agents.
+
+## Why you'll like it
+
+- **One search for everything.** Places and commands share one list, so you
+  never have to remember where something lives.
+- **Narrow it with one letter.** `s pilf` finds the `pi-life` space, `a codex`
+  your Codex agents. If a prefix matches nothing, it just searches everything.
+- **A real command palette.** `>` lists herdr's own actions (split, zoom, close,
+  focus, new tab or workspace, reload config) and every installed plugin's
+  actions, each with its keybinding. Enter runs it.
+- **Agents at a glance.** Vendor logos, live status that updates while the bar
+  is open (`◉` needs you, `◐` working, `●` done, `✓` idle), running time on
+  every row, and a live preview of the selected pane.
+- **Opens on what matters.** Agents waiting on you float to the top and recent
+  places come first. Open, Enter, and you're back where you were, like alt-tab.
+- **Tabs that name themselves.** Unnamed Claude and Codex tabs take the name of
+  the task the agent is working on. Names you chose are never overwritten.
+  Optionally, show each agent's status right in the tab bar.
+- **Tidy as you go.** Rename a tab (`ctrl+r`) or close it (`⌦`) straight from
+  the list.
+- **Small and instant.** One native Rust binary, about 10 ms per keystroke on a
+  2,000-row session. macOS, Linux and Windows.
 
 ## Install
+
+Needs herdr 0.9 or newer.
 
 ```bash
 herdr plugin install adhikasp/herdr-command-plugin
 ```
 
-Then bind a key (herdr does not add keybindings for you). In your herdr
-`config.toml`:
+Herdr doesn't add keybindings for you, so bind one in your herdr `config.toml`:
 
 ```toml
 [[keys.command]]
@@ -67,448 +51,40 @@ command = "herdr-command-plugin.open"
 description = "command bar"
 ```
 
-Reload with `herdr server reload-config`, then press `ctrl+b k`.
+Run `herdr server reload-config`, then press `ctrl+b k`. Want the physical
+Cmd+K? [Here's how](docs/reference.md#making-it-a-real-cmdk).
 
-Requires herdr 0.9.0+ (startup hooks and agent session metadata) on macOS,
-Linux or Windows, x86_64 or ARM. Herdr refuses to install the plugin on anything
-older, so there is nothing to get wrong. Installing runs the plugin's build
-step, which downloads the release binary for your platform and checks it
-against the release's `SHA256SUMS`; if that fails, it builds from source with
-`cargo` instead (Rust 1.88+). Set `HERDR_COMMAND_PLUGIN_BUILD=source` to always build from source.
+## Day-one cheat sheet
 
-**Upgrading from 0.8 or older.** The old Python title watcher keeps running
-after the upgrade, and tab titles stop updating. Run
-`herdr plugin action invoke herdr-command-plugin.stop-titles`, then
-`herdr plugin action invoke herdr-command-plugin.start-titles`, once. Restarting herdr is
-not enough, because the old watcher survives a server restart.
-
-**Windows.** The build step runs in Windows PowerShell. Everything works on
-Windows, with one difference: tab status glyphs follow the watcher's
-two-second poll instead of an event stream. Tested on Windows 11 with herdr 0.9.3 in Windows Terminal.
-
-## Automatic tab updates
-
-Automatic task titles are **on by default**, unless another enabled tab-renaming
-plugin is detected. Status prefixes remain off by default. These independent
-switches in your [config](#configuring) control the two features:
-
-```json
-{
-  "auto_titles": true,
-  "tab_status": false
-}
-```
-
-Set `"auto_titles": false` to opt out of task naming, or `"tab_status": true`
-to enable status prefixes. An explicit `false` is preserved across upgrades.
-Open the bar or run `herdr plugin action invoke herdr-command-plugin.start-titles` to start
-the watcher in an already running server. A running watcher reloads
-these settings every two seconds; disabling both restores status prefixes it
-still owns and exits. Task titles already written are kept. The command bar,
-search, agent icons and manual `ctrl+r` renaming work with both features off.
-
-**Other naming plugins take priority.** If another enabled renaming plugin is
-recognized, herdr-command-plugin skips all automatic tab changes even when these switches
-are on. It checks the plugin registry before the first update and before each
-write, including cleanup, and exits without restoring old prefixes when another
-naming plugin is present. Manual `ctrl+r` renames remain available.
-
-Detection covers known renamers (Auto Title, Tab Title, Auto Session Title and
-Automatic Rename), plus naming metadata in plugin IDs, names, descriptions and
-source repositories. Herdr does not expose a standard renaming capability, so
-custom plugins with unrelated metadata must be listed by ID in
-`"tab_renaming_plugins": ["my.private-renamer"]`. Disabled plugins do not block
-updates. After disabling a competing plugin, open the bar or start the watcher
-again to resume the enabled features.
-
-As a fallback for unrecognized writers, herdr-command-plugin also yields a tab after a user
-or another plugin changes a label it wrote. That decision survives watcher restarts and lasts until the tab closes;
-clearing the name does not reclaim it. Stopping or disabling the watcher never
-strips a prefix from a label it has detected as belonging to another writer.
-
-## Auto title: automatic tab naming
-
-With `"auto_titles": true` (the default), unnamed Claude and Codex tabs pick up their agent's
-task title automatically, even while the bar is closed. The watcher checks every two seconds and follows
-later task-title changes. Codex's trailing ` | folder` is removed; a bare folder
-or agent name is ignored until a task title is available. Claude's local
-transcript supplies its generated title or first human prompt when Herdr has no
-useful terminal title yet. No extra model requests are made.
-
-- **Lowercase titles.** Set `"lowercase_titles": true` in the plugin's
-  `config.json` to lowercase generated task titles. The default is `false`.
-  Changes apply within two seconds while the watcher is running; custom names
-  keep their original case.
-- **Your names win.** Existing custom tab names, pane labels and agent names
-  are preserved. The folder-derived agent name a launcher has to pass to
-  `herdr agent start` (`app`, `app-2`, as herdr-newtab-plus does) counts as a
-  default, not a custom name. Only default names and names recorded as written
-  by this plugin are updated. Manually changing a name opts that tab out for
-  the rest of its lifetime. Tabs with multiple agents are left alone.
-- **Updates survive reopening.** Ownership is saved in the plugin state
-  directory, tied to the agent session and terminal. Old custom names are not
-  adopted just because they match a suggested title.
-- **New sessions.** By default a name stays with the session it was written
-  for, so after `/clear`, a restarted agent or a new terminal in the same pane
-  the tab keeps the old task title. Set `"follow_new_sessions": true` to let
-  the next session in that pane take the name over: the tab follows its task
-  title as soon as it has one. A tab you renamed stays yours, and an agent in
-  another pane never inherits the name.
-- **Starts when enabled.** Herdr's startup and agent-detection hooks start a
-  single background watcher per server. Opening the bar also ensures it is running. After
-  linking or enabling the plugin in an already running server, start it with
-  `herdr plugin action invoke herdr-command-plugin.start-titles`.
-- **Stop or resume.** `herdr plugin action invoke herdr-command-plugin.stop-titles` stops
-  naming for this server; event hooks and popup opens leave it stopped until
-  you invoke `herdr-command-plugin.start-titles` again. Disabling or uninstalling the
-  plugin stops its connected watchers within ten seconds.
-- **Local sources.** Terminal task titles work even when Herdr has no agent
-  session ID, with ownership tied to the pane and terminal. Claude transcript
-  fallback requires a session ID and searches Herdr's `CLAUDE_CONFIG_DIR` (default
-  `~/.claude`) plus any `claude_config_dirs` in the [config](#configuring).
-- **Several Claude config directories.** If you run Claude with different
-  `CLAUDE_CONFIG_DIR` values (separate accounts, say), Herdr's Claude hook must
-  be installed in each one, or those tabs report no session ID:
-  `CLAUDE_CONFIG_DIR=<dir> herdr integration install claude`, then restart or
-  resume those sessions. List the same directories in `claude_config_dirs`.
-- **Opting out.** Set `"auto_titles": false` in the plugin config to disable
-  automatic naming. `HERDR_AUTO_TITLE_TRANSCRIPT=false` in Herdr's environment
-  before starting it remains an additional override. The standalone Auto Title
-  plugin's `config.env` is not read.
-
-Herdr exposes the current name rather than its author: a manual name equal to
-the tab's default position number is indistinguishable from an unnamed tab.
-It also has no conditional rename API, so a rename made in the brief interval
-between the final check and the write cannot be detected.
-
-## Agent icons at a glance
-
-Logos sit before the evenly spaced status and task title. Working titles use
-the orange `working` color (configurable), making a mixed Claude, Codex, Gemini,
-Pi, Grok or Kimi session easy to scan. Custom agent names remain visible; the
-vendor label is omitted when its logo already identifies it.
-
-The logos use the **Herdr Agent Icons Max** font from
-[herdr-radar](https://github.com/hhdebb/herdr-radar) (MIT; the vendor marks
-belong to their owners, see Radar's
-[third-party notices](https://github.com/hhdebb/herdr-radar/blob/main/THIRD_PARTY_NOTICES.md)).
-If Radar already shows logos, you are ready. Radar itself is not required:
-
-```bash
-# macOS; on Linux use ~/.local/share/fonts and run fc-cache -f afterwards
-curl -fsSL -o ~/Library/Fonts/HerdrAgentIconsMax-Regular.ttf \
-  https://raw.githubusercontent.com/hhdebb/herdr-radar/main/dist/HerdrAgentIconsMax-Regular.ttf
-```
-
-On Windows, open the downloaded `.ttf` and choose *Install*. The bar looks for
-it in both the per-user and the system font folder.
-
-Then point your terminal at it for the logo codepoints. In Ghostty's config:
-
-```
-font-codepoint-map = U+E1A0-U+E1B7=Herdr Agent Icons Max
-```
-
-kitty takes `symbol_map U+E1A0-U+E1B7 Herdr Agent Icons Max`. Open a new
-window (or restart the terminal) to load it. The bar and the tab watcher
-detect the font locally and fall back to colored text labels (bar) or the
-status glyph alone (tabs) when it is unavailable. Neither installs fonts for you.
-
-Set `"agent_icons": "font"` to force logos (for example over SSH when the font
-is installed on your local terminal), or `"agent_icons": "none"` for text only.
-The demo uses the icon font and tabs already named for their tasks.
-
-## Live status in the tab bar
-
-With `"tab_status": true`, every tab with an agent leads its name with the
-agent's logo and its status, using the bar's glyphs: `◉` needs you, `◐` working, `●` done, `✓` idle, `○`
-unknown. With several agents in one tab, the most urgent one leads.
-
-```
-  ◐ Repair OAuth callbacks     ◉ Review spec.md     ✓ 3
-```
-
-- **Instant and cheap.** The background watcher subscribes to Herdr's
-  `pane.agent_status_changed` events, so a tab changes the moment its agent
-  does, with no extra polling. Only labels that actually change are rewritten.
-- **Never animates.** Glyphs are static: every rename redraws Herdr's tab bar
-  in each attached terminal, so a tab is rewritten only when its status or
-  name changes, never on a timer or on focus.
-- **No colors.** Herdr draws tab labels as plain text in its own tab colors,
-  so logos and glyphs take the tab's color; the sidebar and the bar keep theirs.
-- **Your names stay yours.** The prefix is added to whatever the tab is
-  called, whether that is an auto title, a name you typed, or the default
-  number. Renaming a tab makes the watcher yield it to you. Unnamed tabs keep
-  renumbering when tabs before them close. Tabs without agents are never touched.
-- **Logos need the font.** Logos appear under the same `agent_icons` rule as
-  the bar; without the font, tabs show the status glyph alone.
-- **Turning it off.** Set `"tab_status": false` in the [config](#configuring),
-  or stop the watcher with `herdr-command-plugin.stop-titles`; both restore names whose
-  prefixes the watcher still owns. `tab_status` does not control task naming:
-  set `"auto_titles": false` as well to disable all automatic tab updates.
-
-Herdr tab labels are plain text, so the status is part of the label: other
-tools reading tab names see the prefix, and the bar strips it from its own rows.
-Herdr cannot hand a renamed tab back its automatic number, so an unnamed tab
-that showed a status keeps its last number after the watcher stops.
-
-## Making it a real Cmd+K
-
-`prefix+k` works everywhere and is the safe default. If you want the physical
-Cmd+K, add a second binding for a chord your terminal can actually deliver —
-`ctrl+alt` is the one modifier family that is free in every terminal we know of:
-
-```toml
-[[keys.command]]
-key = ["prefix+k", "ctrl+alt+k"]
-type = "plugin_action"
-command = "herdr-command-plugin.open"
-description = "command bar"
-```
-
-…and then teach your terminal to send that chord when you press Cmd+K. On macOS,
-Cmd never reaches the program inside the terminal on its own; the terminal has to
-translate it. These send what herdr reads as `ctrl+alt+k`:
-
-| Terminal | Setting |
+| Type | To |
 | --- | --- |
-| Ghostty | `keybind = cmd+k=text:\x1b[107;7u` in `~/.config/ghostty/config` |
-| kitty | `map cmd+k send_text all \x1b[107;7u` |
-| WezTerm | `{ key = "k", mods = "CMD", action = wezterm.action.SendString("\x1b[107;7u") }` |
-| iTerm2 | Settings → Keys → Key Bindings → `⌘K` → *Send Escape Sequence* → `[107;7u` |
-| Terminal.app | No arbitrary key mapping; stay on `prefix+k` |
+| a few letters | search everything |
+| `s ` `a ` `t ` `p ` before a search | only spaces / agents / tabs / named panes (`s:pilf` works too) |
+| `>` or `c ` | commands only |
+| `enter` | jump there, or run the command |
+| `esc` | close, change nothing |
+| `ctrl+r` | rename the selected tab |
+| `⌦` | close the selected tab (asks first) |
 
-`\x1b[107;7u` is the CSI-u encoding of `ctrl+alt+k`. If your terminal prefers the
-legacy form, `\x1b\x0b` says the same thing. Some terminals can forward Cmd
-directly, in which case plain `key = "cmd+k"` in the herdr binding is worth a
-try first — it depends on your terminal's keyboard protocol.
+## Make it yours
 
-Whichever you pick, Cmd+K is likely already taken by the terminal (usually
-"clear scrollback"); the mapping above replaces it.
-
-## Using it
-
-| Key | Does |
-| --- | --- |
-| type | fuzzy search over everything, commands included; space separates terms, all of which must match |
-| `s ` `a ` `t ` `p ` `c ` before a search | narrow it to spaces / agents / tabs / named panes / commands: `s pilf` finds the `pi-life` space |
-| `>` or `:` on an empty query | the command palette: herdr's actions and every plugin action |
-| `↑` `↓`, `ctrl+p` `ctrl+n`, `ctrl+k` `ctrl+j` | move |
-| `enter` | jump to the selected row and close |
-| `esc`, `ctrl+c`, `ctrl+g` | leave, change nothing |
-| `tab` / `shift+tab` | cycle the filter |
-| `@` `%` `$` `!` on an empty query | filter to agents / panes / plain tabs / rows that need you |
-| `backspace` on an empty query | clear the filter, then close the selected row's tab |
-| `delete` (fn+`⌫` on a Mac laptop) | close the selected row's tab, whatever is typed |
-| `ctrl+u` / `ctrl+w` / `ctrl+d` | clear the query and return to the opening filter / delete a word / forward delete |
-| `ctrl+o` | toggle the preview |
-| `ctrl+r` | rename the selected row's tab; Enter saves, Esc keeps the old name |
-| `pgup` / `pgdn` | page |
-| wheel / click | move / select, click again to jump |
-
-**What is in the list.** Every agent, every tab that has no agent, and — once a
-session has more than one — every workspace. Selecting an agent focuses its tab
-and its pane; selecting a workspace opens a new tab in it. Once you type, the
-commands join in too, so `split` or `reload` finds the action; at rest the list
-stays the places you can jump to.
-
-**Kind prefixes.** A first word naming a kind, followed by a space or a colon,
-keeps the search to that kind: `s`, `w`, `ws`, `space` or `workspace` for
-workspaces, `a`/`agent` for agents, `t`/`tab` for tabs (agents included, since
-an agent row is its tab), `p`/`pane` for named panes, and `c`, `cmd`, `command`
-or `>` for commands. `s pilf`, `s:pilf` and `space: pilf` all find the `pi-life`
-space. The chip on the right of the input names the kind while it applies, and
-the prefix word itself never counts as a match. A lone `s` with nothing after it
-is still a search for an s. If the kind has nothing matching the rest, the word
-was a word after all: `pane tab` searches everything for both, and the chip says
-so. `tab` swaps a prefix for the next filter. Prefixes apply in Everything; in
-any other filter the word is ordinary search text.
-
-**Commands rank after places.** When a query fits both, the places you can jump
-to come first; `c ` or `>` puts commands on their own. A command's key binding
-is shown next to it but is not searched.
-
-**Modal mode.** With `"modal": true` the bar opens in a list mode: `j`/`k` move,
-`g`/`G` jump to the top and bottom, `/` starts a search (for words that begin
-with j, k or g), `>` opens the command palette, and any other character starts
-the search with itself, so `s pilf` works straight away. `esc` returns from a
-search to the list and closes the bar from there; `backspace` on an empty search
-returns to the list rather than arming a close.
-
-`% panes` switches to one row per named pane. Unnamed panes stay out of the
-list. Named panes also appear in Everything and participate in its searches;
-the pane filter narrows the list to just those direct pane targets. Selecting a
-pane focuses its tab and that exact pane.
-
-**What a row says.** The tab's own name comes first — that is what you named
-the work and what you remember it by — and an agent's current summary follows it
-in dimmer text. A narrow row keeps the name and drops the summary; a tab with no
-name of its own lets the summary stand in for it. Folder and workspace metadata
-is omitted when the same name is already present in the title or summary, and
-agent labels use distinct colors so mixed-agent sessions scan quickly.
-
-**Closing a tab.** `backspace` — the key macOS labels *delete* — erases the
-query first, then clears the filter, and once there is nothing left to unwind
-it arms the close instead. `delete` (fn+`⌫`) arms it whatever is typed. The
-footer says what is going; `enter` or `y` does it, `esc` or any other key calls
-it off, including the delete keys themselves, so a held key that repeats can
-never answer its own question. Rows are per agent but tabs are what close, so a
-tab running two agents says so before it takes both. Workspaces cannot be
-closed from the bar.
-
-**Running time.** The number next to a row is how long its process has been
-running: the agent session for an agent, the running command — or the shell
-itself, which reads as the age of the tab — for a plain tab. Herdr keeps no
-clocks, so this comes from the operating system, once per pane; a status that
-changed a minute ago on a two-hour-old session still says two hours.
-
-**How it is ordered.** With no query: recently visited rows first, then rows that
-want your attention (blocked, then done, then working), then the rest by
-workspace and tab number. The tab you are currently in is never first. With a
-query: best fuzzy score wins, ties broken by recency and then status. Matches in
-the title outrank matches in a working directory or an agent name. Matched
-characters are drawn bold, colored and underlined wherever the row shows the
-text they landed in — the tab name, the summary, the directory, the agent — so a
-subsequence scattered across a sentence still reads as one, and a row that
-matched on something off screen simply shows no highlight.
-
-## Configuring
-
-Optional. Write `config.json` in the plugin config directory
-(`herdr plugin config-dir herdr-command-plugin`):
-
-```json
-{
-  "preview": "auto",
-  "mouse": true,
-  "refresh_ms": 900,
-  "workspaces": "auto",
-  "selection_background": "auto",
-  "colors": {
-    "accent": "#89b4fa",
-    "match": "#89b4fa",
-    "muted": "bright_black"
-  }
-}
-```
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `preview` | `"auto"` | `true`, `false` (hidden until `ctrl+o`), or `"auto"` (on when the popup is wide enough) |
-| `mouse` | `true` | click and wheel support |
-| `agent_icons` | `"auto"` | Detect the local Herdr Agent Icons Max font; `"font"` forces logos (useful over SSH); `"none"` keeps text labels only |
-| `refresh_ms` | `900` | how often the open bar re-reads the session |
-| `workspaces` | `"auto"` | `true`, `false`, or `"auto"` (on with more than one workspace) |
-| `selection_background` | `"auto"` | `"auto"` asks the terminal for its background color, or set `"none"`, a hex value, or a 0-255 ANSI index |
-| `claude_config_dirs` | `[]` | extra Claude config directories (`"~/.claude-work"`) whose transcripts supply tab titles; changes apply without a restart |
-| `tab_renaming_plugins` | `[]` | additional plugin IDs that suppress all automatic tab writes when enabled |
-| `auto_titles` | `true` | Claude and Codex task titles for unnamed tabs, suppressed by competing naming plugins; `false` opts out |
-| `lowercase_titles` | `false` | lowercase generated task titles; changes apply without a restart and custom names keep their case |
-| `follow_new_sessions` | `false` | `true` lets the next Claude or Codex session in a pane take over the task title written for the one before it, after `/clear`, a restart or a new terminal; a tab you renamed stays yours |
-| `tab_status` | `false` | opt in to agent logos and status glyphs in tab names; `false` restores labels still owned by the watcher |
-| `running_time` | `true` | per-row running time (`47s`, `2h04m`); `false` hides it and skips the per-pane `process_info`/`ps` reading, so the bar opens faster |
-| `scope` | `"all"` | the filter the bar opens with: `"agent"` (`@ agents`), `"pane"` (`% panes`), `"tab"` (`$ shells`), `"blocked"` (`! needs you`) or `"all"`; `backspace` on an empty query still clears it, and `ctrl+u` returns to it |
-| `modal` | `false` | `true` opens in a list mode where `j`/`k` move and typing anything else starts the search (see [Modal mode](#using-it)) |
-| `select_current` | `false` | `true` opens with the row you are in selected instead of the one you came from; the order stays the same, so that row follows the recently visited ones |
-| `colors` | `{}` | role → `#rrggbb`, an ANSI name (`bright_blue`), or 0-255. Roles: `accent`, `match`, `text`, `muted`, `blocked`, `working`, `done`, `idle`, `unknown`, plus `agent_claude`, `agent_codex`, `agent_pi`, `agent_grok`, `agent_kimi`, `agent_gemini`, `agent_cursor`, `agent_opencode` |
-
-Colors default to plain ANSI, so the bar follows whatever theme your terminal
-already uses. The exception is `muted` — the second tier of text, used for
-summaries and running times — which is a gray picked from the
-terminal's own background (lighter on a dark theme, darker on a light one) so it
-stays readable; agent labels use their agent role, and `unknown` is the dimmer
-tier below it for separators and rules.
-
-See [Agent icons at a glance](#agent-icons-at-a-glance) for font setup.
-Detection cannot verify your terminal's active font mapping; if you see boxes,
-check the mapping or set `"agent_icons": "none"`. Unknown agents keep text labels.
-
-Popup size lives in herdr, not here. Override the manifest's `74%` × `62%` per
-invocation with `herdr plugin pane open --plugin herdr-command-plugin --entrypoint bar
---placement popup --width 60% --height 50%`.
-
-## How it works
-
-The bar is one short-lived process in a herdr popup pane. It reads the whole
-session in a single `session.snapshot` call over herdr's socket (a Unix
-socket, or the named pipe herdr serves under the same path on Windows),
-re-reads it while it is open so statuses stay live, tails the selected pane with
-`pane.read` for the preview, and calls `tab.focus`, `pane.focus`, `agent.focus`,
-or `tab.create` when you press Enter, or `tab.close` when you confirm a
-delete. Running times come from `pane.process_info` plus `ps` (the process
-creation time on Windows), one reading per
-pane on the way onto the screen and then ticked locally, because a start time
-never moves. If the socket is unavailable it falls back to the `herdr` CLI.
-Eligible Claude and Codex tabs are updated through `tab.rename`, with a fresh
-name and session check before each write. Claude transcript fallback uses a
-bounded local read. `--list` and `--doctor` remain read-only. A singleton
-background watcher runs when either tab feature is enabled and checks settings
-and titles every two seconds; popup refreshes only read Herdr's snapshot. Each idle tick makes one snapshot request. Tab status rides
-the same watcher: one `events.subscribe` stream (status changes of agent panes
-and agent detection) wakes it immediately, except on Windows, where the
-two-second tick carries status changes instead. A status change costs one
-rename per affected tab. Nothing is renamed on a timer. Decorated tabs are
-recorded in `tab-status.json` before their first prefixed label is written, so
-only labels the watcher still owns are restored. Exact written labels and
-conflict records prevent repeated writes against another naming plugin. Plugin
-registration is checked through `plugin.list` every ten seconds, without assuming
-any registry file location. Before each automatic rename, the plugin list is
-checked again for enabled naming plugins; an unavailable registry also prevents
-the write. Automatic-name ownership and watcher locks are isolated by socket
-path under `HERDR_PLUGIN_STATE_DIR/title-servers/`; recent rows remain shared.
-The watcher uses only the injected socket, reconnects with backoff up to thirty
-seconds during server downtime, and remains asleep between attempts. It never
-starts a server or falls back to a different session. An explicit stop still
-works while offline. Plugin replacement reloads the registered code while
-retaining the singleton lock. Diagnostics are written to `title-watcher.log`
-in the server's state subdirectory. Tab titles themselves are stored by Herdr.
-
-## Development
-
-```bash
-git clone https://github.com/adhikasp/herdr-command-plugin
-cd herdr-command-plugin
-HERDR_COMMAND_PLUGIN_BUILD=source sh scripts/install.sh   # build this clone (Rust 1.88+)
-herdr plugin link .         # link never runs the build step, so build first
-
-cargo test --release                            # everything below, in one go
-HERDR_COMMAND_PLUGIN_PARITY_ONLY=bar-rename cargo test --test parity   # one parity scenario
-HERDR_COMMAND_PLUGIN_PARITY_BLESS=1 cargo test --test parity           # accept an intended UI change
-bin/herdr-command-plugin --doctor                          # environment diagnostics
-bin/herdr-command-plugin --list                            # the rows, as JSON
-```
-
-The bar started as a Python package, and the tests keep the Rust port to what
-that release did. Besides the unit tests, `src/probe.rs` replays about 19,000
-answers the Python functions gave (`tests/data/fuzz-corpus.jsonl`), and on
-Linux and macOS `tests/parity.rs` drives the binary on a pseudo-terminal
-against a fake herdr. It compares every screen, the bytes each repaint costs,
-every herdr request and every state file with transcripts recorded from the
-Python release (`tests/parity/golden.json`). None of it needs a herdr server.
-When a UI change is intended, bless the golden and review its diff.
-
-The README demo is recorded from the real binary, on a pseudo-terminal against
-a fake herdr session, in real time. `cargo run --release --features demo
---example record_demo` writes `demo/herdr-command-plugin.gif` and `demo/herdr-command-plugin.mp4`
-(needs `ffmpeg`, and the Herdr Agent Icons Max font for the logos); copy the
-GIF to `assets/demo.gif`. The `demo` feature is never part of the plugin build.
-`herdr plugin log list --plugin herdr-command-plugin` shows what herdr recorded when it
-launched the plugin.
+Prefer vim keys? Set `"modal": true` and the bar opens as a `j`/`k` list where
+typing anything else starts a search. Install the Herdr Agent Icons Max font for
+vendor logos, or turn on `"tab_status"` for status glyphs in the tab bar.
+Every key, option and behaviour is in the **[full reference](docs/reference.md)**.
 
 ## Goes well with
 
-[herdr-newtab-plus](https://github.com/jeffarese/herdr-newtab-plus) is the
-other half of the loop. This bar jumps you to the tabs you already have; that
-plugin opens the one you don't — it asks which folder and which agent,
-completes real paths, remembers where you work, and starts the agent for you.
+[herdr-newtab-plus](https://github.com/jeffarese/herdr-newtab-plus) is the other
+half of the loop: this bar jumps to the tabs you have, that one opens the tabs
+you don't have yet.
 
 ## Credits
 
 herdr-command-plugin grew out of Jeff Arese's
-[herdr-bar](https://github.com/jeffarese/herdr-bar), which built the bar, the
-tab titles and the agent icons, and is released under the same MIT license. The
-command palette, everything-search with kind prefixes, and modal mode are new
-here.
+[herdr-bar](https://github.com/jeffarese/herdr-bar) (MIT), which built the bar,
+the tab titles and the agent icons. The command palette, everything-search with
+kind prefixes, and modal mode are new here.
 
 ## License
 

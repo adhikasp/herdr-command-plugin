@@ -61,6 +61,37 @@ fn fake_tools(directory: &Path, machine: &Value) -> PathBuf {
     bin
 }
 
+/// The machine's PATH, minus any `herdr` on it.
+///
+/// The recorded runs had no Herdr installed, and a real one changes what a run
+/// does: the bar's plugin-action lookup and the unreachable fallbacks reach it.
+/// Where the system directories hold a `herdr`, they are shadowed once per test
+/// run by a directory of links to everything else in them.
+fn system_path(path: &str) -> String {
+    static SHADOW: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let dirs: Vec<&str> = path.split(':').filter(|d| !d.is_empty()).collect();
+    if !dirs.iter().any(|d| Path::new(d).join("herdr").exists()) {
+        return path.to_string();
+    }
+    SHADOW
+        .get_or_init(|| {
+            let shadow = mkdtemp().join("sys");
+            std::fs::create_dir_all(&shadow).unwrap();
+            for dir in &dirs {
+                let Ok(entries) = std::fs::read_dir(dir) else { continue };
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let link = shadow.join(&name);
+                    if name != "herdr" && !link.exists() {
+                        let _ = std::os::unix::fs::symlink(entry.path(), link);
+                    }
+                }
+            }
+            shadow.to_str().unwrap().to_string()
+        })
+        .clone()
+}
+
 pub struct Machine {
     pub tmp: PathBuf,
     pub socket_path: PathBuf,
@@ -117,7 +148,7 @@ impl Machine {
         }
         let s = |p: &Path| p.to_str().unwrap().to_string();
         this.env = vec![
-            ("PATH".into(), format!("{}:{}", s(&bin), machine.get("path").as_str().unwrap())),
+            ("PATH".into(), format!("{}:{}", s(&bin), system_path(machine.get("path").as_str().unwrap()))),
             ("HOME".into(), s(&home)),
             ("TERM".into(), "xterm-256color".into()),
             ("LANG".into(), "C.UTF-8".into()),

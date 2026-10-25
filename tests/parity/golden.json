@@ -1,11 +1,6 @@
 {
  "bar-broken-config": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -151,12 +146,7 @@
   ]
  },
  "bar-bulk": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -974,10 +964,6 @@
  "bar-close": {
   "changes": [
    [
-    "ping",
-    {}
-   ],
-   [
     "tab.close",
     {
      "tab_id": "w1:t3"
@@ -1258,10 +1244,6 @@
  },
  "bar-close-backspace": {
   "changes": [
-   [
-    "ping",
-    {}
-   ],
    [
     "tab.close",
     {
@@ -1562,12 +1544,7 @@
   ]
  },
  "bar-close-panic": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -1741,12 +1718,7 @@
   ]
  },
  "bar-colors": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -1929,10 +1901,6 @@
  "bar-empty": {
   "changes": [
    [
-    "ping",
-    {}
-   ],
-   [
     "tab.create",
     {
      "focus": true,
@@ -2079,12 +2047,7 @@
   "reads": []
  },
  "bar-icons": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -2424,10 +2387,6 @@
  "bar-jump-agent": {
   "changes": [
    [
-    "ping",
-    {}
-   ],
-   [
     "tab.focus",
     {
      "tab_id": "w1:t3"
@@ -2622,12 +2581,7 @@
   ]
  },
  "bar-jump-nothing": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -2999,10 +2953,6 @@
  "bar-jump-pane": {
   "changes": [
    [
-    "ping",
-    {}
-   ],
-   [
     "tab.focus",
     {
      "tab_id": "w1:t1"
@@ -3234,10 +3184,6 @@
  },
  "bar-jump-query": {
   "changes": [
-   [
-    "ping",
-    {}
-   ],
    [
     "tab.focus",
     {
@@ -3526,10 +3472,6 @@
  },
  "bar-jump-workspace": {
   "changes": [
-   [
-    "ping",
-    {}
-   ],
    [
     "tab.create",
     {
@@ -3882,10 +3824,6 @@
  "bar-mouse": {
   "changes": [
    [
-    "ping",
-    {}
-   ],
-   [
     "tab.focus",
     {
      "tab_id": "w1:t5"
@@ -4144,12 +4082,7 @@
   ]
  },
  "bar-mouse-off": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -4291,12 +4224,7 @@
   ]
  },
  "bar-move": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -4766,12 +4694,7 @@
   ]
  },
  "bar-narrow": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -4919,12 +4842,7 @@
   ]
  },
  "bar-no-running-time": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -5052,12 +4970,7 @@
   ]
  },
  "bar-no-selection": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -5239,12 +5152,7 @@
   ]
  },
  "bar-odd-keys": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -5614,12 +5522,7 @@
   ]
  },
  "bar-open-cancel": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -5765,12 +5668,7 @@
   ]
  },
  "bar-paste": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -6000,12 +5898,7 @@
   ]
  },
  "bar-preview-off": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -6235,12 +6128,7 @@
   ]
  },
  "bar-preview-on": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -6502,12 +6390,7 @@
   ]
  },
  "bar-preview-toggle": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -6803,10 +6686,6 @@
  "bar-recents": {
   "changes": [
    [
-    "ping",
-    {}
-   ],
-   [
     "tab.focus",
     {
      "tab_id": "w2:t2"
@@ -6966,10 +6845,6 @@
  },
  "bar-rename": {
   "changes": [
-   [
-    "ping",
-    {}
-   ],
    [
     "tab.rename",
     {
@@ -7571,12 +7446,7 @@
   ]
  },
  "bar-rename-cancel": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -7974,12 +7844,7 @@
   ]
  },
  "bar-rename-editing": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -8545,12 +8410,7 @@
   ]
  },
  "bar-rename-pane": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -8788,12 +8648,7 @@
   ]
  },
  "bar-scopes": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -9487,12 +9342,7 @@
   ]
  },
  "bar-tall": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -9720,12 +9570,7 @@
   ]
  },
  "bar-tiny": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -9810,12 +9655,7 @@
   ]
  },
  "bar-type-and-erase": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -10641,12 +10481,7 @@
   ]
  },
  "bar-unicode": {
-  "changes": [
-   [
-    "ping",
-    {}
-   ]
-  ],
+  "changes": [],
   "exit": 0,
   "files": {
    "{watcher}/title-launch.lock": "",
@@ -11077,7 +10912,7 @@
   "frames": [
    {
     "after": "open",
-    "bytes": 200,
+    "bytes": 74,
     "screen": [
      "",
      "",
@@ -11107,7 +10942,7 @@
   "modes": [
    "osc:11;?"
   ],
-  "printed": "herdr-command-plugin: {\"id\":\"cli:api:snapshot\",\"error\":{\"code\":\"server_not_running\",\"message\":\"no herdr server is running at /tmp/hbp-XXXXXXXX/herdr.sock; run `herdr` to start or attach it\"}}\r\n",
+  "printed": "herdr-command-plugin: herdr binary not found (set HERDR_BIN_PATH)\r\n",
   "reads": []
  },
  "cli-doctor": {
@@ -11126,7 +10961,7 @@
    "{watcher}/title-watcher.stopped": ""
   },
   "stderr": "",
-  "stdout": "herdr-command-plugin <version>\n<masked>\n<masked>\nherdr bin        herdr\nsocket           <tmp>/herdr.sock\nsocket usable    no, using the CLI\nconfig           <tmp>/config/config.json\nstate            <tmp>/state/recent.json\npreview          auto\nrefresh          900ms\nstdin is a tty   no\nherdr            unreachable: {\"id\":\"cli:api:snapshot\",\"error\":{\"code\":\"server_not_running\",\"message\":\"no herdr server is running at <tmp>/herdr.sock; run `herdr` to start or attach it\"}}\n"
+  "stdout": "herdr-command-plugin <version>\n<masked>\n<masked>\nherdr bin        herdr\nsocket           <tmp>/herdr.sock\nsocket usable    no, using the CLI\nconfig           <tmp>/config/config.json\nstate            <tmp>/state/recent.json\npreview          auto\nrefresh          900ms\nstdin is a tty   no\nherdr            unreachable: herdr binary not found (set HERDR_BIN_PATH)\n"
  },
  "cli-h": {
   "changes": [],
@@ -11179,7 +11014,7 @@
   "files": {
    "{watcher}/title-watcher.stopped": ""
   },
-  "stderr": "herdr-command-plugin: {\"id\":\"cli:api:snapshot\",\"error\":{\"code\":\"server_not_running\",\"message\":\"no herdr server is running at <tmp>/herdr.sock; run `herdr` to start or attach it\"}}\n",
+  "stderr": "herdr-command-plugin: herdr binary not found (set HERDR_BIN_PATH)\n",
   "stdout": ""
  },
  "cli-no-tty": {
