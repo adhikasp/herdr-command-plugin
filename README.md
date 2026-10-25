@@ -21,10 +21,11 @@ the Slack quick switcher or VS Code's Cmd+P, for a terminal full of agents.
   focus, new tab or workspace, reload config) and every installed plugin's
   actions, each with its keybinding. Enter runs it.
 - **Agents at a glance.** Vendor logos, live status that updates while the bar
-  is open (`◉` needs you, `◐` working, `●` done, `✓` idle), and a live preview
+  is open (`◉` needs you, `◐` working, `●` done and unread), and a live preview
   of the selected pane.
-- **Opens on what matters.** Agents waiting on you float to the top and recent
-  places come first. Open, Enter, and you're back where you were, like alt-tab.
+- **Unread first.** Agents waiting on you and agents that finished since you
+  last looked open at the top, then the places you were just in. Quiet rows stay
+  quiet: no checkmark where there is nothing new.
 - **Tabs that name themselves.** Unnamed Claude and Codex tabs take the name of
   the task the agent is working on. Names you chose are never overwritten.
   Optionally, show each agent's status right in the tab bar.

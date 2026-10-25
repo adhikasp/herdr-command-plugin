@@ -38,8 +38,9 @@ the automatic tab updates behave, icon font setup, internals and development.
 - **optional status in the tab bar** — agent tabs lead with their logo and status,
   updated only when the status changes.
 - **live status, herdr's own language** — `◉` needs you, `◐` working,
-  `●` done, `✓` idle. Colors and glyphs mirror the herdr sidebar, and the list
-  keeps updating while it is open.
+  `●` done and unread; an idle agent with nothing new shows no glyph. Colors
+  and glyphs mirror the herdr sidebar, and the list keeps updating while it is
+  open.
 - **named panes on demand** — `%` switches to one row per pane, led by the
   name you assigned it, and Enter focuses that exact pane.
 - **opens on what matters** — blocked and finished agents float to the top,
@@ -158,7 +159,7 @@ pane focuses its tab and that exact pane.
 ```
 ▌ ✳  ◐ Check the receipt email copy — summary        @name  atlas/api
 │ │  │ └ the tab's own name, then the agent's summary in dimmer text
-│ │  └ status, for agents and spaces: ◉ needs you ◐ working ● done ✓ idle
+│ │  └ status, for agents and spaces: ◉ needs you ◐ working ● done (idle shows none)
 │ └ kind: the agent's logo (@ without the icon font), # space, $ shell, % pane, > command
 └ ▌ selected, › the tab you are in
 ```
@@ -187,9 +188,11 @@ itself, which reads as the age of the tab — for a plain tab. Herdr keeps no
 clocks, so this comes from the operating system, once per pane; a status that
 changed a minute ago on a two-hour-old session still says two hours.
 
-**How it is ordered.** With no query: recently visited rows first, then rows that
-want your attention (blocked, then done, then working), then the rest by
-workspace and tab number. The tab you are currently in is never first. With a
+**How it is ordered.** With no query: unread first, meaning agents waiting on
+you and then agents that finished since you last looked (each group most
+recently visited first); then the places you visited recently; then the rest,
+working before idle, by workspace and tab number. The tab you are currently in
+is never first; it sits right after the unread and recent rows. With a
 query: best fuzzy score wins, ties broken by recency and then status. Matches in
 the title outrank matches in a working directory or an agent name. Matched
 characters are drawn bold and in the match color wherever the row shows the

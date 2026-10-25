@@ -350,7 +350,7 @@ impl Bar {
         &self.pool[..self.item_count]
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn pane_items(&self) -> &[Item] {
         &self.pool[self.item_count..self.command_start]
     }
@@ -539,6 +539,7 @@ impl Bar {
     }
 
     fn resting_order(&self, items: &[usize]) -> Vec<usize> {
+        let mut unread: Vec<usize> = Vec::new();
         let mut recent: Vec<(usize, usize)> = Vec::new();
         let mut rest: Vec<usize> = Vec::new();
         let mut current: Option<usize> = None;
@@ -546,6 +547,12 @@ impl Bar {
             let item = &self.pool[index];
             if Some(&item.key) == self.current_key.as_ref() || (self.scope == "pane" && item.kind == KIND_PANE && item.focused) {
                 current = Some(index);
+                continue;
+            }
+            // What you have not seen yet comes first: agents waiting on you,
+            // then agents that finished since you last looked.
+            if item.kind == KIND_AGENT && matches!(item.status.as_str(), "blocked" | "done") {
+                unread.push(index);
                 continue;
             }
             match self.recents.rank(&item.key, &item.title) {
@@ -567,14 +574,20 @@ impl Bar {
                 .then_with(|| a.tab_number.unwrap_or(1 << 30).cmp(&b.tab_number.unwrap_or(1 << 30)))
                 .then_with(|| a.title.cmp(&b.title))
         });
-        let mut ordered: Vec<usize> = recent.iter().map(|(_, item)| *item).collect();
-        let recent_count = recent.len();
+        unread.sort_by_key(|&index| {
+            let item = &self.pool[index];
+            let recent = self.recents.rank(&item.key, &item.title).unwrap_or(usize::MAX);
+            (item.status_rank(), recent, item.workspace_label.clone(), item.tab_number.unwrap_or(1 << 30))
+        });
+        let mut ordered: Vec<usize> = unread;
+        ordered.extend(recent.iter().map(|(_, item)| *item));
+        let head = ordered.len();
         ordered.extend(rest);
         if let Some(current) = current {
             // Never first: open-then-Enter should take you somewhere else, the
-            // way alt-tab does. Right after the recents block is close enough
-            // to stay findable.
-            let at = ordered.len().min(recent_count.max(1));
+            // way alt-tab does. Right after the unread and recent rows is close
+            // enough to stay findable.
+            let at = ordered.len().min(head.max(1));
             ordered.insert(at, current);
         }
         ordered
@@ -1092,7 +1105,7 @@ impl Bar {
             .iter()
             .filter(|i| i.workspace_id == workspace_id && (i.kind == KIND_AGENT || i.kind == KIND_TAB))
             .map(|i| {
-                let lead = if i.kind == KIND_AGENT { crate::theme::status_glyph(&i.status) } else { "$" };
+                let lead = if i.kind == KIND_AGENT { render::row_glyph(i).unwrap_or(" ") } else { "$" };
                 (i.tab_number, format!("{} {}", lead, i.title))
             })
             .collect();
@@ -2014,30 +2027,48 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn recents_float_to_the_top() {
-        let mut recents = Recents::new(None);
-        recents.touch("w1:p5", "library depth battery");
-        let t = bar_with(testutil::snapshot(), Config::default(), recents);
-        assert_eq!(titles(&t.bar)[0], "library depth battery");
+    fn unread_rows_come_first() {
+        // Two agents wait on you and one finished unseen; they lead, needs-you first.
+        let t = bar();
+        let statuses: Vec<&str> = (0..3).map(|i| row_item(&t.bar, i).status.as_str()).collect();
+        assert_eq!(statuses, vec!["blocked", "blocked", "done"]);
     }
 
     #[cfg(unix)]
     #[test]
-    fn current_row_sits_right_after_the_recents() {
+    fn recents_follow_the_unread_rows() {
         let mut recents = Recents::new(None);
-        recents.touch("w1:p5", "");
+        recents.touch("w1:p2", "Redesign week loading screen");
         let t = bar_with(testutil::snapshot(), Config::default(), recents);
-        assert_eq!(Some(&row_item(&t.bar, 1).key), t.bar.current_key.as_ref());
+        assert_eq!(row_item(&t.bar, 3).key, "w1:p2");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_recently_visited_unread_row_leads_its_kind() {
+        let mut recents = Recents::new(None);
+        recents.touch("w1:p4", "");
+        let t = bar_with(testutil::snapshot(), Config::default(), recents);
+        assert_eq!(row_item(&t.bar, 0).key, "w1:p4");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_row_sits_right_after_the_unread_and_recent_rows() {
+        let mut recents = Recents::new(None);
+        recents.touch("w1:p2", "");
+        let t = bar_with(testutil::snapshot(), Config::default(), recents);
+        assert_eq!(Some(&row_item(&t.bar, 4).key), t.bar.current_key.as_ref());
     }
 
     #[cfg(unix)]
     #[test]
     fn select_current_opens_on_the_row_you_are_in() {
         let mut recents = Recents::new(None);
-        recents.touch("w1:p5", "");
+        recents.touch("w1:p2", "");
         let config = config_of(&[("select_current", Value::Bool(true))]);
         let t = bar_with(testutil::snapshot(), config, recents);
-        assert_eq!(t.bar.selected, 1);
+        assert_eq!(t.bar.selected, 4);
         assert_eq!(Some(&t.bar.selected_item().key), t.bar.current_key.as_ref());
     }
 

@@ -17,6 +17,9 @@
 - The scrollbar sits in the divider beside the preview, the footer drops whole
   hints and counts what the active filter could show, and the preview header
   shows status, agent and path, the tabs of a workspace, or what a command does.
+- Unread first: with no query the list opens on agents waiting on you, then
+  agents that finished since you last looked, then recent places. Idle rows
+  show no glyph instead of a green checkmark.
 - Running time is off by default; `"running_time": true` brings it back.
 
 ## 0.13.0

@@ -260,6 +260,15 @@ pub struct RowStyle {
     pub place_width: isize,
 }
 
+/// The status glyph a row shows, if any: only agents and spaces have one,
+/// and an idle row has nothing new to tell, so it shows nothing.
+pub fn row_glyph(item: &Item) -> Option<&'static str> {
+    if (item.kind != KIND_AGENT && item.kind != KIND_SPACE) || item.status == "idle" {
+        return None;
+    }
+    Some(crate::theme::status_glyph(&item.status))
+}
+
 /// The kind column: an agent's logo (or `@` without the icon font), and the
 /// filter sigils for everything else, so the rows teach the filters.
 fn kind_cell(theme: &Theme, item: &Item) -> Segment {
@@ -461,10 +470,9 @@ pub fn render_row_styled(
     } else {
         Segment::new("", "  ")
     };
-    let status = if item.kind == KIND_AGENT || item.kind == KIND_SPACE {
-        Segment::new(status_role(&item.status), format!("{} ", crate::theme::status_glyph(&item.status)))
-    } else {
-        Segment::new("", "  ")
+    let status = match row_glyph(item) {
+        Some(glyph) => Segment::new(status_role(&item.status), format!("{} ", glyph)),
+        None => Segment::new("", "  "),
     };
     let leading = vec![marker, kind_cell(theme, item), status];
 
@@ -797,8 +805,8 @@ fn wrap(text: &str, width: isize, lines: usize) -> Vec<String> {
 fn preview_facts(item: &Item) -> (Vec<Segment>, String, String) {
     let mut lead = Vec::new();
     let word = status_word(&item.status);
-    if !word.is_empty() && (item.kind == KIND_AGENT || item.kind == KIND_SPACE) {
-        lead.push(Segment::new(status_role(&item.status), format!("{} {}", crate::theme::status_glyph(&item.status), word)));
+    if let Some(glyph) = row_glyph(item).filter(|_| !word.is_empty()) {
+        lead.push(Segment::new(status_role(&item.status), format!("{} {}", glyph, word)));
     }
     let mut facts: Vec<String> = Vec::new();
     match item.kind {
@@ -1190,6 +1198,13 @@ mod tests {
         let item = items().remove(0);
         let plain = strip_ansi(&draw(&theme(), &item, &row(&[]), 90, false, None));
         assert!(!has_age(&plain), "{:?}", plain);
+    }
+
+    #[test]
+    fn idle_rows_show_no_glyph() {
+        let item = items().into_iter().find(|i| i.status == "idle").unwrap();
+        let plain = strip_ansi(&draw(&theme(), &item, &row(&[]), 60, false, None));
+        assert!(!plain.contains('✓'), "{}", plain);
     }
 
     #[test]

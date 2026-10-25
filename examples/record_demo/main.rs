@@ -263,7 +263,7 @@ mod unix {
 
     /// The script: one scene per feature, captioned, with real keys and pauses.
     fn perform(r: &mut Recorder, spawn: impl FnOnce() -> Session) {
-        r.say("one chord · every space, tab, agent and pane in one list");
+        r.say("one chord · everything in one list, unread first");
         // The empty panel first, so the bar is seen opening.
         r.hold(0.4);
         r.session = Some(spawn());
