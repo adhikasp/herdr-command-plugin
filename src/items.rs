@@ -52,6 +52,8 @@ pub struct Item {
     pub detail_field: isize,
     /// Herdr CLI arguments a command row runs; None for every other row.
     pub command: Option<Vec<String>>,
+    /// The key bound to a command row in herdr's config, shown at its right.
+    pub binding: String,
 }
 
 pub struct ItemInit {
@@ -122,6 +124,7 @@ impl Item {
             prepared,
             detail_field,
             command: None,
+            binding: String::new(),
         }
     }
 

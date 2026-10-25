@@ -45,8 +45,8 @@ the automatic tab updates behave, icon font setup, internals and development.
 - **opens on what matters** — blocked and finished agents float to the top,
   recently visited rows above them, and the tab you are in is never first, so
   open-then-Enter works like alt-tab.
-- **running time on every row** — how long the agent session, or whatever the
-  tab is running, has been up: `47s`, `12m`, `2h04m`, `4d3h`.
+- **running time, if you want it** — with `"running_time": true`, each row says
+  how long its agent session or command has been up: `47s`, `12m`, `2h04m`, `4d3h`.
 - **live preview** — the right column tails the selected pane, so you can look
   before you leap.
 - **closes tabs** — `⌦` on a row closes its tab once you confirm, so the
@@ -153,12 +153,24 @@ list. Named panes also appear in Everything and participate in its searches;
 the pane filter narrows the list to just those direct pane targets. Selecting a
 pane focuses its tab and that exact pane.
 
-**What a row says.** The tab's own name comes first — that is what you named
-the work and what you remember it by — and an agent's current summary follows it
-in dimmer text. A narrow row keeps the name and drops the summary; a tab with no
-name of its own lets the summary stand in for it. Folder and workspace metadata
-is omitted when the same name is already present in the title or summary, and
-agent labels use distinct colors so mixed-agent sessions scan quickly.
+**What a row says.** Every row has the same columns:
+
+```
+▌ ✳  ◐ Check the receipt email copy — summary        @name  atlas/api
+│ │  │ └ the tab's own name, then the agent's summary in dimmer text
+│ │  └ status, for agents and spaces: ◉ needs you ◐ working ● done ✓ idle
+│ └ kind: the agent's logo (@ without the icon font), # space, $ shell, % pane, > command
+└ ▌ selected, › the tab you are in
+```
+
+On the right, a named agent's `@name` (or the agent kind when no logo shows it),
+then its place, `workspace/folder`, in one column that lines up down the list.
+Command rows show their key binding there instead, or the plugin they come from.
+A narrow popup keeps only the folder, then only the title. The tab's own name
+comes first, since that is what you named the work; a tab with no name of its
+own lets the summary stand in for it, and a summary that only repeats the name
+is left out. The preview's header carries the rest: status, agent and path for
+an agent, the tabs inside a workspace, what a command does and its binding.
 
 **Closing a tab.** `backspace` — the key macOS labels *delete* — erases the
 query first, then clears the filter, and once there is nothing left to unwind
@@ -169,7 +181,7 @@ never answer its own question. Rows are per agent but tabs are what close, so a
 tab running two agents says so before it takes both. Workspaces cannot be
 closed from the bar.
 
-**Running time.** The number next to a row is how long its process has been
+**Running time** (opt in with `"running_time": true`). The number next to a row is how long its process has been
 running: the agent session for an agent, the running command — or the shell
 itself, which reads as the age of the tab — for a plain tab. Herdr keeps no
 clocks, so this comes from the operating system, once per pane; a status that
@@ -180,7 +192,7 @@ want your attention (blocked, then done, then working), then the rest by
 workspace and tab number. The tab you are currently in is never first. With a
 query: best fuzzy score wins, ties broken by recency and then status. Matches in
 the title outrank matches in a working directory or an agent name. Matched
-characters are drawn bold, colored and underlined wherever the row shows the
+characters are drawn bold and in the match color wherever the row shows the
 text they landed in — the tab name, the summary, the directory, the agent — so a
 subsequence scattered across a sentence still reads as one, and a row that
 matched on something off screen simply shows no highlight.
@@ -253,7 +265,7 @@ Optional. Write `config.json` in the plugin config directory
 | `lowercase_titles` | `false` | lowercase generated task titles; changes apply without a restart and custom names keep their case |
 | `follow_new_sessions` | `false` | `true` lets the next Claude or Codex session in a pane take over the task title written for the one before it, after `/clear`, a restart or a new terminal; a tab you renamed stays yours |
 | `tab_status` | `false` | opt in to agent logos and status glyphs in tab names; `false` restores labels still owned by the watcher |
-| `running_time` | `true` | per-row running time (`47s`, `2h04m`); `false` hides it and skips the per-pane `process_info`/`ps` reading, so the bar opens faster |
+| `running_time` | `false` | `true` adds each row's running time (`47s`, `2h04m`), read once per pane with `process_info`/`ps`; off, the bar skips that reading and opens faster |
 | `scope` | `"all"` | the filter the bar opens with: `"agent"` (`@ agents`), `"pane"` (`% panes`), `"tab"` (`$ shells`), `"blocked"` (`! needs you`) or `"all"`; `backspace` on an empty query still clears it, and `ctrl+u` returns to it |
 | `modal` | `false` | `true` opens in a list mode where `j`/`k` move and typing anything else starts the search (see [Modal mode](#using-it)) |
 | `select_current` | `false` | `true` opens with the row you are in selected instead of the one you came from; the order stays the same, so that row follows the recently visited ones |

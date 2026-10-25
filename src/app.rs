@@ -93,6 +93,30 @@ fn prefix_chip(kind: &str) -> &'static str {
     }
 }
 
+/// A kind prefix's chip: the same `<sigil> <noun>` however the filter was entered.
+fn prefix_label(kind: &str) -> &'static str {
+    match kind {
+        KIND_SPACE => "# spaces",
+        KIND_AGENT => "@ agents",
+        KIND_TAB => "tabs",
+        KIND_PANE => "% panes",
+        KIND_COMMAND => "> commands",
+        _ => "",
+    }
+}
+
+/// What a scoped placeholder offers to search.
+fn scope_noun(scope: &str) -> &'static str {
+    match scope {
+        "agent" => "agents",
+        "pane" => "panes",
+        "tab" => "shells",
+        "blocked" => "what needs you",
+        "command" => "commands",
+        _ => "everything",
+    }
+}
+
 fn of_prefix_kind(kind: &str, item: &Item) -> bool {
     item.kind == kind || (kind == KIND_TAB && item.kind == KIND_AGENT)
 }
@@ -103,10 +127,12 @@ pub const PREVIEW_TTL: f64 = 1.5;
 pub const ESC_TIMEOUT: f64 = 0.04;
 pub const STATUS_TTL: f64 = 2.5;
 
-pub const PLACEHOLDER: &str = "search everything…    s space · a agent · t tab · p pane · c command";
-pub const PLACEHOLDER_SHORT: &str = "search everything…";
-pub const PLACEHOLDER_NORMAL: &str = "type to search    s space · a agent · t tab · c command    j/k move";
-pub const PLACEHOLDER_NORMAL_SHORT: &str = "type to search · j/k move";
+pub const PLACEHOLDER: &str = "search everything…";
+pub const PLACEHOLDER_NORMAL: &str = "type to search";
+/// The kind prefixes, shown after the placeholder while there is room.
+pub const LEGEND: &[(&str, &str)] = &[("s", "space"), ("a", "agent"), ("t", "tab"), ("p", "pane"), ("c", "command")];
+pub const LEGEND_NORMAL: &[(&str, &str)] =
+    &[("s", "space"), ("a", "agent"), ("t", "tab"), ("p", "pane"), ("c", "command"), ("j/k", "move")];
 
 /// time.monotonic(): seconds on a clock that only moves forward. It starts
 /// far from zero, as Python's does, so "never" (0.0) is long ago.
@@ -324,6 +350,7 @@ impl Bar {
         &self.pool[..self.item_count]
     }
 
+    #[cfg(test)]
     pub fn pane_items(&self) -> &[Item] {
         &self.pool[self.item_count..self.command_start]
     }
@@ -1028,6 +1055,18 @@ impl Bar {
     fn preview_lines(&mut self, item: Option<usize>) -> (Vec<String>, bool) {
         let Some(index) = item else { return (Vec::new(), false) };
         let item = &self.pool[index];
+        if item.kind == KIND_SPACE {
+            return (self.space_lines(&item.workspace_id), false);
+        }
+        if item.kind == KIND_COMMAND {
+            let mut lines = Vec::new();
+            if item.command.as_ref().and_then(|argv| argv.first()).map(String::as_str) == Some("plugin") {
+                lines.push(format!("from the {} plugin", item.subtitle));
+            }
+            lines.push(String::new());
+            lines.push("⏎ runs it".into());
+            return (lines, false);
+        }
         let Some(pane_id) = item.pane_id.clone().filter(|p| !p.is_empty()) else { return (Vec::new(), false) };
         if item.kind == KIND_SPACE {
             return (Vec::new(), false);
@@ -1044,6 +1083,25 @@ impl Bar {
             self.preview_pending = Some((pane_id, now + PREVIEW_DEBOUNCE));
         }
         (lines, true)
+    }
+
+    /// What a workspace holds, one line per tab: so you can look before you
+    /// open a new tab there.
+    fn space_lines(&self, workspace_id: &str) -> Vec<String> {
+        let mut lines: Vec<(Option<i128>, String)> = self.items()
+            .iter()
+            .filter(|i| i.workspace_id == workspace_id && (i.kind == KIND_AGENT || i.kind == KIND_TAB))
+            .map(|i| {
+                let lead = if i.kind == KIND_AGENT { crate::theme::status_glyph(&i.status) } else { "$" };
+                (i.tab_number, format!("{} {}", lead, i.title))
+            })
+            .collect();
+        lines.sort_by_key(|(number, _)| number.unwrap_or(1 << 30));
+        let mut out: Vec<String> = lines.into_iter().map(|(_, line)| line).collect();
+        if out.is_empty() {
+            out.push("no tabs yet".into());
+        }
+        out
     }
 
     fn pump_preview(&mut self, height: isize) {
@@ -1139,18 +1197,25 @@ impl Bar {
 
         let mut rows: Vec<String> = Vec::new();
         let chip = match (self.prefix(), self.parsed_prefix()) {
-            (Some(kind), _) => prefix_chip(kind).to_string(),
+            (Some(kind), _) => render::Chip::loud(prefix_label(kind)),
             // The kind word found nothing and the search widened: say so.
-            (None, Some(kind)) => format!("no {} · everything", prefix_chip(kind)),
-            (None, None) => scope_chip(self.scope).to_string(),
+            (None, Some(kind)) => render::Chip {
+                lead: format!("no {} · ", prefix_chip(kind)),
+                text: "everything".into(),
+                loud: false,
+            },
+            (None, None) if self.scope != "all" => render::Chip::loud(scope_chip(self.scope)),
+            // Unscoped: nothing to say until there is a query to qualify.
+            (None, None) if self.query.is_empty() => render::Chip::default(),
+            (None, None) => render::Chip::quiet("everything"),
         };
-        let chip = chip.as_str();
-        let wide = layout.inner_width >= 62;
-        let placeholder = match (self.config.modal && !self.searching, wide) {
-            (true, true) => PLACEHOLDER_NORMAL,
-            (true, false) => PLACEHOLDER_NORMAL_SHORT,
-            (false, true) => PLACEHOLDER,
-            (false, false) => PLACEHOLDER_SHORT,
+        let scoped_placeholder = format!("search {}…", scope_noun(self.scope));
+        let (placeholder, legend): (&str, &[(&str, &str)]) = if self.config.modal && !self.searching {
+            (PLACEHOLDER_NORMAL, LEGEND_NORMAL)
+        } else if self.scope != "all" {
+            (&scoped_placeholder, &[])
+        } else {
+            (PLACEHOLDER, LEGEND)
         };
         if let Some((_, old_title)) = &self.pending_rename {
             rows.push(format!(
@@ -1161,14 +1226,24 @@ impl Bar {
                     self.rename_cursor,
                     layout.inner_width,
                     &format!("new name for “{}”", old_title),
-                    "⏎ save · esc keep",
+                    &[],
+                    &render::Chip::loud("⏎ save · esc keep"),
                     "rename ❯",
                 )
             ));
         } else {
             rows.push(format!(
                 " {}",
-                render::render_input(&self.theme, &self.query, self.cursor, layout.inner_width, placeholder, chip, render::PROMPT)
+                render::render_input(
+                    &self.theme,
+                    &self.query,
+                    self.cursor,
+                    layout.inner_width,
+                    placeholder,
+                    legend,
+                    &chip,
+                    render::PROMPT
+                )
             ));
         }
         if layout.rules {
@@ -1189,13 +1264,19 @@ impl Bar {
             );
         }
 
-        let list_body = self.list_rows(&layout);
+        let (list_body, marks) = self.list_rows(&layout);
         for index in 0..layout.list_height.max(0) as usize {
             let left = list_body.get(index).map(|s| s.as_str()).unwrap_or("");
             if layout.preview_width != 0 {
                 let right = preview_body.get(index).map(|s| s.as_str()).unwrap_or("");
                 let left = pad(left, layout.list_width);
-                let separator = self.theme.paint("unknown", render::SEPARATOR);
+                // The scrollbar lives in the divider: one line, not two.
+                let separator = match marks.get(&(index as isize)).copied() {
+                    Some(render::SCROLL_THUMB) => {
+                        format!(" {} ", self.theme.paint("muted", render::SCROLL_THUMB))
+                    }
+                    _ => self.theme.paint("unknown", render::SEPARATOR),
+                };
                 rows.push(format!(" {}{}{}", left, separator, right));
             } else {
                 rows.push(format!(" {}", left));
@@ -1231,7 +1312,9 @@ impl Bar {
         self.offset = offset.min((self.rows.len() as isize - height).max(0)).max(0) as usize;
     }
 
-    fn list_rows(&mut self, layout: &Layout) -> Vec<String> {
+    /// The list's rows, and the scrollbar marks when it overflows; with the
+    /// preview showing the caller draws those in the divider.
+    fn list_rows(&mut self, layout: &Layout) -> (Vec<String>, BTreeMap<isize, &'static str>) {
         if self.rows.is_empty() {
             let filter = match self.prefix() {
                 Some(kind) => prefix_chip(kind),
@@ -1244,11 +1327,24 @@ impl Bar {
             let top = ((layout.list_height - empty.len() as isize).max(0) / 2) as usize;
             let mut out = vec![String::new(); top];
             out.extend(empty);
-            return out;
+            return (out, BTreeMap::new());
         }
         let marks = scrollbar_column(self.rows.len() as isize, layout.list_height, self.offset as isize, layout.list_height);
-        let content_width = layout.list_width - if marks.is_empty() { 0 } else { 1 };
-        let show_workspace = self.workspace_count > 1;
+        let in_divider = layout.preview_width != 0;
+        let content_width = layout.list_width - if marks.is_empty() || in_divider { 0 } else { 2 };
+        let mut style = render::RowStyle {
+            show_workspace: self.workspace_count > 1,
+            tier: render::meta_tier(content_width),
+            place_width: 0,
+        };
+        // One place column for the frame, as wide as the widest visible place.
+        let visible = self.offset..(self.offset + layout.list_height.max(0) as usize).min(self.rows.len());
+        style.place_width = self.rows[visible]
+            .iter()
+            .map(|row| render::place_width(&self.pool[row.item], &style))
+            .max()
+            .unwrap_or(0)
+            .min(render::PLACE_MAX);
         let mut out = Vec::new();
         for index in 0..layout.list_height.max(0) {
             let position = self.offset + index as usize;
@@ -1257,23 +1353,24 @@ impl Bar {
             } else {
                 let item_index = self.rows[position].item;
                 let age = self.age_of(item_index);
-                render::render_row(
+                render::render_row_styled(
                     &self.theme,
                     &self.pool[item_index],
                     &self.rows[position],
                     content_width,
                     position == self.selected,
-                    show_workspace,
+                    &style,
                     age,
                 )
             };
-            if !marks.is_empty() {
+            if !marks.is_empty() && !in_divider {
                 let mark = marks.get(&index).copied().unwrap_or(" ");
-                body = format!("{}{}", pad(&body, content_width), self.theme.paint("unknown", mark));
+                let role = if mark == render::SCROLL_THUMB { "muted" } else { "unknown" };
+                body = format!("{} {}", pad(&body, content_width), self.theme.paint(role, mark));
             }
             out.push(body);
         }
-        out
+        (out, if in_divider { marks } else { BTreeMap::new() })
     }
 
     fn footer(&self, width: isize) -> String {
@@ -1293,28 +1390,32 @@ impl Bar {
             let hints = if width < 52 { &hints[..2] } else { &hints[..] };
             return render::render_footer(&self.theme, width, hints, &self.rows.len().to_string());
         }
-        let close_key = if self.backspace_closes() { "⌫" } else { "⌦" };
-        // In modal mode esc steps back to the list before it quits.
-        let esc = if self.config.modal { "back" } else { "quit" };
-        // Spaces and commands have no tab to close or rename.
-        let tabless = self.rows.is_empty() || matches!(self.selected_item().kind, KIND_SPACE | KIND_COMMAND);
-        let go = if !self.rows.is_empty() && self.selected_item().kind == KIND_COMMAND { "run" } else { "jump" };
-        let mut hints: Vec<(&str, &str)> = vec![("↑↓", "move"), ("⏎", go), ("⇥", "scope")];
-        if !tabless {
-            // Backspace only reaches the close once there is nothing left for
-            // it to erase, so the footer names whichever key works right now.
-            hints.extend([(close_key, "close"), ("^r", "rename")]);
-        }
-        hints.extend([("^o", "preview"), ("esc", esc)]);
-        if width < 52 {
-            hints = vec![("↑↓", ""), ("⏎", ""), ("esc", "")];
-        }
-        let total = match self.scope {
-            "pane" => self.pane_items().len(),
-            "command" => self.pool.len() - self.command_start,
-            "all" => self.candidates(self.prefix_used).len(),
-            _ => self.items().len(),
+        let mut hints: Vec<(&str, &str)> = if self.rows.is_empty() {
+            vec![("^u", "clear"), ("⇥", "scope")]
+        } else {
+            let close_key = if self.backspace_closes() { "⌫" } else { "⌦" };
+            // Spaces and commands have no tab to close or rename.
+            let tabless = matches!(self.selected_item().kind, KIND_SPACE | KIND_COMMAND);
+            let go = if self.selected_item().kind == KIND_COMMAND { "run" } else { "jump" };
+            let mut hints = vec![("⏎", go), ("⇥", "scope")];
+            if !tabless {
+                // Backspace only reaches the close once there is nothing left for
+                // it to erase, so the footer names whichever key works right now.
+                hints.extend([(close_key, "close"), ("^r", "rename")]);
+            }
+            hints.push(("^o", "preview"));
+            hints
         };
+        if self.config.modal {
+            // In modal mode esc steps back to the list before it quits.
+            hints.push(("esc", "back"));
+        }
+        if width < 52 {
+            hints.truncate(2);
+        }
+        // Out of what the active filter could show, so a filter that hides
+        // nothing reads as whole.
+        let total = self.candidates(self.prefix_used).len();
         let shown = self.rows.len();
         let counter = if shown != total { format!("{}/{}", shown, total) } else { total.to_string() };
         render::render_footer(&self.theme, width, &hints, &counter)
@@ -1779,6 +1880,12 @@ mod tests {
     #[cfg(unix)]
     fn bar() -> T {
         bar_with(testutil::snapshot(), Config::default(), Recents::new(None))
+    }
+
+    /// `bar()` with the opt-in running time on.
+    #[cfg(unix)]
+    fn timed_bar() -> T {
+        bar_with(testutil::snapshot(), config_of(&[("running_time", Value::Bool(true))]), Recents::new(None))
     }
 
     #[cfg(unix)]
@@ -3073,7 +3180,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_pane_is_read_once_and_then_ticked_locally() {
-        let mut t = bar();
+        let mut t = timed_bar();
         let item = pane_item(&t.bar, "w1:p3");
         assert_eq!(t.bar.age_of(item), None); // queued, not read yet
         t.bar.pump_ages();
@@ -3089,7 +3196,7 @@ mod tests {
         // Python read one pane per pass. The port dates the whole queue at
         // once, with one `ps` for all of it (commit bc4747f), and never asks
         // about a pane again.
-        let mut t = bar();
+        let mut t = timed_bar();
         for index in 0..t.bar.items().len() {
             t.bar.age_of(index);
         }
@@ -3107,7 +3214,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_undatable_pane_is_not_asked_twice() {
-        let mut t = bar();
+        let mut t = timed_bar();
         t.fake.set(|s| s.ages = Value::Dict(Map::new()));
         let item = pane_item(&t.bar, "w1:p3");
         t.bar.age_of(item);
@@ -3170,12 +3277,24 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn workspace_rows_have_no_preview() {
+    fn workspace_rows_preview_their_tabs_without_reading_a_pane() {
         let mut t = bar();
-        let item = item_index(&t.bar, |i| i.kind == KIND_SPACE);
+        let item = item_index(&t.bar, |i| i.kind == KIND_SPACE && i.title == "erestor");
         let (lines, loading) = t.bar.preview_lines(Some(item));
-        assert!(lines.is_empty());
         assert!(!loading);
+        assert!(lines.iter().any(|l| l.contains("retry queue backoff")), "{:?}", lines);
+        assert!(lines.iter().all(|l| !l.contains("server")), "{:?}", lines);
+        assert!(t.fake.calls("read").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_rows_preview_what_enter_does() {
+        let mut t = bar();
+        press(&mut t.bar, &[b"c zoom"]);
+        let (lines, loading) = t.bar.preview_lines(Some(t.bar.rows[0].item));
+        assert!(!loading);
+        assert!(lines.iter().any(|l| l.contains("runs it")));
     }
 
     // -- frames (tests/test_render.py's draw() helper) -----------------------
@@ -3334,9 +3453,10 @@ mod tests {
         let accent = Theme::new(None, None, None).fg("accent").to_string();
         let all = draw(110, 20, "").rows[0].clone();
         let agent = frame(110, 20, "", "agent", default_config(), false, b"").rows[0].clone();
-        assert!(all.contains(&format!("{} everything ", accent)));
-        assert!(crate::textutil::strip_ansi(&all).contains("everything"));
-        assert!(agent.contains(&format!("{} @ agents ", accent)));
+        // At rest everything needs no saying; a narrowing filter is loud.
+        assert!(!crate::textutil::strip_ansi(&all).trim_end().ends_with("everything"));
+        assert!(agent.contains(&format!("{}@ agents", accent)));
+        assert!(crate::textutil::strip_ansi(&agent).contains("search agents…"));
         assert!(crate::textutil::strip_ansi(&agent).contains("@ agents"));
     }
 
@@ -3400,9 +3520,17 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn rows_carry_their_running_time() {
-        let plain = joined(&draw(140, 20, "").rows);
+    fn rows_carry_their_running_time_when_asked() {
+        let config = config_of(&[("running_time", Value::Bool(true))]);
+        let plain = joined(&frame(140, 20, "", "all", config, false, b"").rows);
         assert!(has_hours(&plain), "{}", plain);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rows_leave_out_running_time_by_default() {
+        let plain = joined(&draw(140, 20, "").rows);
+        assert!(!has_hours(&plain), "{}", plain);
     }
 
     #[cfg(unix)]

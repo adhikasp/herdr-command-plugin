@@ -269,11 +269,11 @@ mod unix {
         r.session = Some(spawn());
         r.hold(2.6);
 
-        r.say("Claude, Codex, Gemini, Pi, Grok and Kimi · live status, running time");
+        r.say("Claude, Codex, Gemini, Pi, Grok and Kimi · live status at a glance");
         r.repeat("down", 3, 0.45);
         r.hold(1.0);
 
-        r.say("type to fuzzy-search all of it · matches underlined");
+        r.say("type to fuzzy-search all of it · matches light up");
         r.type_text("invo", 0.16);
         r.hold(2.0);
 

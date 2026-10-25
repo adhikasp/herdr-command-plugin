@@ -222,7 +222,7 @@ mod tests {
         let rendered = render_row(&theme, &item, &row, 80, true, false, None);
         assert!(strip_ansi(&rendered).starts_with("▌ \u{e1a1} "));
         assert!(strip_ansi(&rendered).contains("@helper"));
-        assert!(rendered.contains("\x1b[4m"));
+        assert!(rendered.contains(theme.fg("match")));
         theme.agent_icons = false;
         let plain = strip_ansi(&render_row(&theme, &item, &row, 80, false, false, None));
         assert!(!plain.contains('\u{e1a1}'));

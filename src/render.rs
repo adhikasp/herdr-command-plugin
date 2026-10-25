@@ -8,7 +8,7 @@
 
 use crate::age::format_age;
 use crate::icons;
-use crate::items::{Item, KIND_COMMAND, KIND_PANE, KIND_SPACE};
+use crate::items::{Item, KIND_AGENT, KIND_COMMAND, KIND_PANE, KIND_SPACE};
 use crate::pyos;
 use crate::pystr;
 use crate::textutil::{display_width, pad, truncate, truncate_middle, window_positions};
@@ -34,7 +34,7 @@ pub fn status_word(status: &str) -> &'static str {
 pub const DETAIL_SEP: &str = " — ";
 pub const MIN_DETAIL: isize = 6;
 pub const MIN_TITLE: isize = 16;
-pub const META_SHARE: f64 = 0.45;
+pub const META_SHARE: f64 = 0.40;
 pub const MIN_LIST: isize = 46;
 pub const PREVIEW_MIN: isize = 28;
 pub const PREVIEW_MAX: isize = 56;
@@ -141,7 +141,7 @@ fn highlight(text: &str, positions: &[usize], base_role: &'static str, bold: boo
             role: if marked { "match" } else { base_role },
             text: run.to_string(),
             bold: bold || marked,
-            underline: marked,
+            underline: false,
         });
     };
     for (index, c) in text.chars().enumerate() {
@@ -227,6 +227,206 @@ fn status_role(status: &str) -> &'static str {
     }
 }
 
+/// How much of the right-hand metadata a frame shows, decided once per frame
+/// from the list width so every row keeps the same columns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MetaTier {
+    /// Narrow: kind, status and title only.
+    None,
+    /// The last part of the place only.
+    Short,
+    /// Who and where, in full.
+    Full,
+}
+
+pub const PLACE_MAX: isize = 18;
+
+pub fn meta_tier(list_width: isize) -> MetaTier {
+    if list_width < 50 {
+        MetaTier::None
+    } else if list_width < 64 {
+        MetaTier::Short
+    } else {
+        MetaTier::Full
+    }
+}
+
+/// The per-frame layout every row in the list shares.
+#[derive(Clone, Copy, Debug)]
+pub struct RowStyle {
+    pub show_workspace: bool,
+    pub tier: MetaTier,
+    /// Width of the place column: the widest place among the visible rows.
+    pub place_width: isize,
+}
+
+/// The kind column: an agent's logo (or `@` without the icon font), and the
+/// filter sigils for everything else, so the rows teach the filters.
+fn kind_cell(theme: &Theme, item: &Item) -> Segment {
+    if item.kind == KIND_AGENT {
+        let role = agent_role(item.agent.as_deref());
+        return match theme.agent_icons.then(|| icons::logo_for(item.agent.as_deref())).flatten() {
+            Some(logo) => Segment::new(role, format!("{}  ", logo)),
+            None => Segment::new(role, "@  "),
+        };
+    }
+    let sigil = match item.kind {
+        KIND_SPACE => "#",
+        KIND_PANE => "%",
+        KIND_COMMAND => ">",
+        _ => "$",
+    };
+    Segment::new("unknown", format!("{}  ", sigil))
+}
+
+/// Leading status glyphs and spinners another tool put in a title.
+fn title_noise(c: char) -> bool {
+    matches!(c, '◉' | '◐' | '●' | '✓' | '○' | '·' | '✳' | '✻' | '✶' | '✢' | '⏺' | '★' | '•')
+        || ('\u{2800}'..='\u{28FF}').contains(&c)
+}
+
+/// The title as drawn, and how many characters were cut from its front.
+fn clean_title(title: &str) -> (String, usize) {
+    let mut cut = 0;
+    for c in title.chars() {
+        if title_noise(c) || (cut > 0 && pystr::is_space(c)) {
+            cut += 1;
+        } else {
+            break;
+        }
+    }
+    if cut == 0 || cut >= title.chars().count() {
+        return (title.to_string(), 0);
+    }
+    (title.chars().skip(cut).collect(), cut)
+}
+
+/// Whether the summary only repeats the start of the title.
+fn detail_repeats_title(title: &str, detail: &str) -> bool {
+    let title = pystr::casefold(pystr::strip(title));
+    let detail = pystr::casefold(pystr::strip(detail));
+    let head: String = title.chars().take(8).collect();
+    detail == title || (head.chars().count() == 8 && detail.starts_with(&head))
+}
+
+/// The parts of a row's place, as (shown text, field it came from, offset).
+fn place_parts(item: &Item, style: &RowStyle) -> Vec<(String, String, isize)> {
+    if style.tier == MetaTier::None || item.kind == KIND_SPACE || item.kind == KIND_COMMAND {
+        return Vec::new();
+    }
+    let mut parts: Vec<(String, String, isize)> = Vec::new();
+    let workspace = &item.workspace_label;
+    if style.show_workspace && !workspace.is_empty() {
+        parts.push((workspace.clone(), workspace.clone(), 0));
+    }
+    let (context, context_start) = context_label(item);
+    if !context.is_empty() && !parts.iter().any(|(shown, _, _)| pystr::lower(shown) == pystr::lower(&context)) {
+        parts.push((context, item.subtitle.clone(), -context_start));
+    }
+    parts.retain(|(shown, _, _)| !duplicates_primary_text(item, shown));
+    if style.tier == MetaTier::Short && parts.len() > 1 {
+        parts.drain(..parts.len() - 1);
+    }
+    parts
+}
+
+/// How wide a row's place is, for sizing the frame's place column.
+pub fn place_width(item: &Item, style: &RowStyle) -> isize {
+    let parts = place_parts(item, style);
+    if parts.is_empty() {
+        return 0;
+    }
+    parts.iter().map(|(shown, _, _)| display_width(shown) as isize).sum::<isize>() + parts.len() as isize - 1
+}
+
+fn place_segments(item: &Item, row: &Row, style: &RowStyle) -> Vec<Segment> {
+    let parts = place_parts(item, style);
+    let width: isize = place_width(item, style);
+    if width > style.place_width.max(1) {
+        // Too long for the column: keep the end, where the folder is.
+        let joined: Vec<&str> = parts.iter().map(|(shown, _, _)| shown.as_str()).collect();
+        let text: String = joined.join("/");
+        let keep = (style.place_width - 1).max(0) as usize;
+        let chars: Vec<char> = text.chars().collect();
+        let tail: String = chars[chars.len().saturating_sub(keep)..].iter().collect();
+        return vec![Segment::new("muted", format!("…{}", tail))];
+    }
+    let mut out = Vec::new();
+    for (index, (shown, field, offset)) in parts.iter().enumerate() {
+        if index > 0 {
+            out.push(Segment::new("unknown", "/"));
+        }
+        out.extend(chunk("muted", shown, &field_marks(item, row, field, *offset)));
+    }
+    out
+}
+
+/// A key binding as people read it: `prefix+shift+h` is `prefix ⇧H`.
+pub fn format_binding(binding: &str) -> Vec<Segment> {
+    let parts: Vec<&str> = binding.split('+').collect();
+    let mut out = Vec::new();
+    let mut keys = String::new();
+    let shifted = parts.contains(&"shift");
+    for (index, part) in parts.iter().enumerate() {
+        let last = index == parts.len() - 1;
+        match *part {
+            "prefix" if !last => out.push(Segment::new("unknown", "prefix ")),
+            "ctrl" if !last => keys.push('⌃'),
+            "alt" | "option" if !last => keys.push('⌥'),
+            "shift" if !last => keys.push('⇧'),
+            "cmd" | "super" if !last => keys.push('⌘'),
+            "" if last => keys.push('+'),
+            key => {
+                if shifted && key.chars().count() == 1 {
+                    keys.push_str(&key.to_uppercase());
+                } else {
+                    keys.push_str(key);
+                }
+            }
+        }
+    }
+    out.push(Segment::new("text", keys));
+    out
+}
+
+/// What a plugin is called once its vendor and `herdr-` are dropped.
+fn short_plugin_name(plugin_id: &str) -> &str {
+    let name = plugin_id.rsplit('.').next().unwrap_or(plugin_id);
+    name.strip_prefix("herdr-").filter(|n| !n.is_empty()).unwrap_or(name)
+}
+
+/// The "who" column: a named agent, the agent kind when no logo says it, or a
+/// command's key binding (its plugin when it has none).
+fn who_segments(theme: &Theme, item: &Item, row: &Row) -> Vec<Segment> {
+    if item.kind == KIND_COMMAND {
+        if !item.binding.is_empty() {
+            return format_binding(&item.binding);
+        }
+        let from_plugin = item.command.as_ref().map(|argv| argv.first().map(String::as_str) == Some("plugin")).unwrap_or(false);
+        if from_plugin && !item.subtitle.is_empty() {
+            return vec![Segment::new("unknown", short_plugin_name(&item.subtitle))];
+        }
+        return Vec::new();
+    }
+    let agent = item.agent.as_deref().unwrap_or("");
+    if agent.is_empty() {
+        return Vec::new();
+    }
+    let agent_name = item.agent_name.as_deref().unwrap_or("");
+    let role = agent_role(Some(agent));
+    if !agent_name.is_empty() {
+        let mut out = vec![Segment::new(role, "@")];
+        out.extend(chunk(role, agent_name, &field_marks(item, row, agent_name, 0)));
+        return out;
+    }
+    let logo = theme.agent_icons.then(|| icons::logo_for(Some(agent))).flatten();
+    if logo.is_none() {
+        return chunk(role, agent, &field_marks(item, row, agent, 0));
+    }
+    Vec::new()
+}
+
+#[cfg(test)]
 pub fn render_row(
     theme: &Theme,
     item: &Item,
@@ -236,77 +436,78 @@ pub fn render_row(
     show_workspace: bool,
     age: Option<f64>,
 ) -> String {
+    let mut style = RowStyle { show_workspace, tier: meta_tier(width), place_width: 0 };
+    style.place_width = place_width(item, &style).min(PLACE_MAX);
+    render_row_styled(theme, item, row, width, selected, &style, age)
+}
+
+/// One row: `marker kind status title — detail      who  place`, with the
+/// same columns on every row of the frame.
+pub fn render_row_styled(
+    theme: &Theme,
+    item: &Item,
+    row: &Row,
+    width: isize,
+    selected: bool,
+    style: &RowStyle,
+    age: Option<f64>,
+) -> String {
     let background = if selected { theme.selection_bg.as_str() } else { "" };
-    let marker =
-        if selected { Segment::new("accent", format!("{} ", SELECTED_BAR)) } else { Segment::new("", "  ") };
-    let glyph_role = status_role(&item.status);
-    let glyph = Segment::new(glyph_role, format!("{} ", crate::theme::status_glyph(&item.status)));
-    let logo = if theme.agent_icons { icons::logo_for(item.agent.as_deref()) } else { None };
-    let mut leading = vec![marker];
-    if let Some(logo) = logo {
-        leading.push(Segment::new(agent_role(item.agent.as_deref()), format!("{}  ", logo)));
-    }
-    leading.push(glyph);
+    let marker = if selected {
+        Segment::new("accent", format!("{} ", SELECTED_BAR))
+    } else if item.focused && item.kind != KIND_SPACE {
+        // Where you are now: a quiet mark instead of a word in the metadata.
+        Segment::new("muted", "› ")
+    } else {
+        Segment::new("", "  ")
+    };
+    let status = if item.kind == KIND_AGENT || item.kind == KIND_SPACE {
+        Segment::new(status_role(&item.status), format!("{} ", crate::theme::status_glyph(&item.status)))
+    } else {
+        Segment::new("", "  ")
+    };
+    let leading = vec![marker, kind_cell(theme, item), status];
 
-    let mut meta: Vec<Vec<Segment>> = Vec::new();
-    let (context, context_start) = context_label(item);
-    if show_workspace
-        && !item.workspace_label.is_empty()
-        && item.kind != KIND_SPACE
-        && pystr::lower(&item.workspace_label) != pystr::lower(&context)
-        && !duplicates_primary_text(item, &item.workspace_label)
-    {
-        let marks = field_marks(item, row, &item.workspace_label, 0);
-        meta.push(chunk("muted", &item.workspace_label, &marks));
-    }
-    if !context.is_empty() && !duplicates_primary_text(item, &context) {
-        let marks = field_marks(item, row, &item.subtitle, -context_start);
-        meta.push(chunk("muted", &context, &marks));
-    }
-    let agent = item.agent.as_deref().unwrap_or("");
-    let agent_name = item.agent_name.as_deref().unwrap_or("");
-    if !agent.is_empty() && (!agent_name.is_empty() || logo.is_none()) {
-        let (label, marks) = if !agent_name.is_empty() {
-            (format!("@{}", agent_name), field_marks(item, row, agent_name, 1))
-        } else {
-            (agent.to_string(), field_marks(item, row, agent, 0))
-        };
-        meta.push(chunk(agent_role(Some(agent)), &label, &marks));
-    }
-    if item.focused {
-        meta.push(vec![Segment::new("accent", "current")]);
-    }
+    // The right side: [age] [who] [place], places in one column per frame.
+    let mut who = who_segments(theme, item, row);
     if let Some(age) = age {
-        meta.push(vec![Segment::new("muted", format_age(age))]);
+        let mut timed = vec![Segment::new("muted", format_age(age))];
+        if !who.is_empty() {
+            timed.push(Segment::new("", "  "));
+        }
+        timed.extend(who);
+        who = timed;
     }
-    let word = status_word(&item.status);
-    if !word.is_empty() {
-        let marks = field_marks(item, row, word, 0);
-        meta.push(chunk(glyph_role, word, &marks));
-    }
-    if item.kind == KIND_SPACE {
-        meta.push(chunk("muted", "space", &field_marks(item, row, "space", 0)));
-    } else if item.kind == KIND_PANE {
-        meta.push(chunk("muted", "pane", &field_marks(item, row, "pane", 0)));
-    } else if item.kind == KIND_COMMAND {
-        meta.push(vec![Segment::new("muted", "cmd")]);
-    }
-
+    let mut place = if style.place_width > 0 { place_segments(item, row, style) } else { Vec::new() };
+    let place_column = if item.kind == KIND_COMMAND { 0 } else { style.place_width };
     let fixed = plain_width(&leading);
     let available = (width - fixed).max(0);
-    let meta_budget = MIN_TITLE.max((available as f64 * META_SHARE) as isize);
-    while !meta.is_empty() && (meta_width(&meta) > meta_budget || available - meta_width(&meta) - 2 < MIN_TITLE) {
-        meta.remove(0);
+    let budget = MIN_TITLE.max((available as f64 * META_SHARE) as isize);
+    let right_width = |who: &[Segment], column: isize| -> isize {
+        let who_width = plain_width(who);
+        who_width + column + if who_width > 0 && column > 0 { 2 } else { 0 }
+    };
+    let mut column = if style.tier == MetaTier::None { 0 } else { place_column };
+    if right_width(&who, column) > budget || available - right_width(&who, column) - 2 < MIN_TITLE {
+        who.clear();
     }
-    let meta_w = if meta.is_empty() { 0 } else { meta_width(&meta) };
-    let title_width = (available - if meta_w > 0 { meta_w + 2 } else { 0 }).max(1);
+    if right_width(&who, column) > budget || available - right_width(&who, column) - 2 < MIN_TITLE {
+        column = 0;
+        place.clear();
+    }
+    if style.tier == MetaTier::None {
+        who.clear();
+    }
+    let right_w = right_width(&who, column);
+    let title_width = (available - if right_w > 0 { right_w + 2 } else { 0 }).max(1);
 
-    let (title_text, positions, _) = window_positions(&item.title, title_width, &row.positions);
-    let title_role = if item.status == "working" { "working" } else { "text" };
-    let mut title_segments = highlight(&title_text, &positions, title_role, selected);
+    let (title, cut) = clean_title(&item.title);
+    let shifted: Vec<usize> = row.positions.iter().filter(|&&p| p >= cut).map(|&p| p - cut).collect();
+    let (title_text, positions, _) = window_positions(&title, title_width, &shifted);
+    let mut title_segments = highlight(&title_text, &positions, "text", selected);
 
     let mut used = plain_width(&title_segments);
-    if !item.detail.is_empty() {
+    if !item.detail.is_empty() && !detail_repeats_title(&title, &item.detail) {
         let room = title_width - used - display_width(DETAIL_SEP) as isize;
         if room >= MIN_DETAIL {
             let empty = Vec::new();
@@ -321,14 +522,20 @@ pub fn render_row(
             used = plain_width(&title_segments);
         }
     }
-    let gap = if meta_w > 0 { (available - used - meta_w).max(1) } else { available - used };
     let mut segments = leading;
     segments.extend(title_segments);
-    if meta_w > 0 {
-        segments.push(Segment::new("", " ".repeat(gap.max(0) as usize)));
-        segments.extend(join_meta(meta));
-    } else {
-        segments.push(Segment::new("", " ".repeat(gap.max(0) as usize)));
+    if right_w > 0 {
+        segments.push(Segment::new("", " ".repeat((available - used - right_w).max(1) as usize)));
+        let who_width = plain_width(&who);
+        segments.extend(who);
+        if column > 0 {
+            if who_width > 0 {
+                segments.push(Segment::new("", "  "));
+            }
+            let place_used = plain_width(&place);
+            segments.extend(place);
+            segments.push(Segment::new("", " ".repeat((column - place_used).max(0) as usize)));
+        }
     }
 
     let body = segments_to_text(theme, &segments, background);
@@ -340,44 +547,74 @@ pub fn render_row(
     }
 }
 
-fn join_meta(meta: Vec<Vec<Segment>>) -> Vec<Segment> {
-    let mut out = Vec::new();
-    for (index, chunk) in meta.into_iter().enumerate() {
-        if index > 0 {
-            out.push(Segment::new("unknown", " · "));
-        }
-        out.extend(chunk);
-    }
-    out
-}
-
-fn meta_width(meta: &[Vec<Segment>]) -> isize {
-    if meta.is_empty() {
-        return 0;
-    }
-    meta.iter().map(|chunk| plain_width(chunk)).sum::<isize>() + 3 * (meta.len() as isize - 1)
-}
-
 fn slice(text: &str, start: usize, stop: usize) -> String {
     text.chars().skip(start).take(stop.saturating_sub(start)).collect()
 }
 
+/// The filter named on the right of the input: loud (accent, bold) when it
+/// narrows the list, quiet when it only says "everything".
+#[derive(Clone, Debug, Default)]
+pub struct Chip {
+    /// Muted words before the chip, e.g. "no panes · " when a search widened.
+    pub lead: String,
+    pub text: String,
+    pub loud: bool,
+}
+
+impl Chip {
+    pub fn loud(text: impl Into<String>) -> Chip {
+        Chip { lead: String::new(), text: text.into(), loud: true }
+    }
+
+    pub fn quiet(text: impl Into<String>) -> Chip {
+        Chip { lead: String::new(), text: text.into(), loud: false }
+    }
+
+    fn segments(&self) -> Vec<Segment> {
+        let mut out = Vec::new();
+        if !self.lead.is_empty() {
+            out.push(Segment::new("muted", self.lead.clone()));
+        }
+        out.push(if self.loud { Segment::bold("accent", self.text.clone(), true) } else { Segment::new("unknown", self.text.clone()) });
+        out
+    }
+}
+
+/// The placeholder's legend, `s space   a agent …`, dropping whole items from
+/// the right rather than cutting one in half.
+fn legend_segments(legend: &[(&str, &str)], room: isize) -> Vec<Segment> {
+    let mut out: Vec<Segment> = Vec::new();
+    for (index, (key, word)) in legend.iter().enumerate() {
+        let gap = if index == 0 { "    " } else { "   " };
+        let item = [Segment::new("unknown", gap), Segment::new("muted", *key), Segment::new("unknown", format!(" {}", word))];
+        if plain_width(&out) + plain_width(&item) > room {
+            break;
+        }
+        out.extend(item);
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn render_input(
     theme: &Theme,
     query: &str,
     cursor: usize,
     width: isize,
     placeholder: &str,
-    chip: &str,
+    legend: &[(&str, &str)],
+    chip: &Chip,
     prompt_text: &str,
 ) -> String {
-    let mut chip_text = String::new();
-    let mut chip_width = 0;
+    let mut chip_segments: Vec<Segment> = Vec::new();
     let prompt_width = display_width(prompt_text) as isize + 1;
-    if !chip.is_empty() && width > display_width(chip) as isize + prompt_width + 24 {
-        chip_text = format!(" {} ", chip);
-        chip_width = display_width(&chip_text) as isize;
+    if !chip.text.is_empty() {
+        let wanted = chip.segments();
+        if width > plain_width(&wanted) + 2 + prompt_width + 24 {
+            chip_segments = wanted;
+        }
     }
+    let chip_width = if chip_segments.is_empty() { 0 } else { plain_width(&chip_segments) + 2 };
     let field_width = (width - prompt_width - chip_width).max(1);
     let prompt = segments_to_text(theme, &[Segment::bold("accent", format!("{} ", prompt_text), true)], "");
 
@@ -403,14 +640,16 @@ pub fn render_input(
             + display_width(&after) as isize;
     } else {
         let hint = truncate(placeholder, (field_width - 2).max(0));
-        rendered =
-            format!("{}\x1b[7m \x1b[27m{}", prompt, segments_to_text(theme, &[Segment::new("unknown", hint.clone())], ""));
-        used = prompt_width + 1 + display_width(&hint) as isize;
+        let mut segments = vec![Segment::new("unknown", hint.clone())];
+        segments.extend(legend_segments(legend, field_width - 2 - display_width(&hint) as isize));
+        rendered = format!("{}\x1b[7m \x1b[27m{}", prompt, segments_to_text(theme, &segments, ""));
+        used = prompt_width + 1 + plain_width(&segments);
     }
-    if !chip_text.is_empty() {
-        let padding = (width - used - display_width(&chip_text) as isize).max(1);
+    if !chip_segments.is_empty() {
+        let padding = (width - used - plain_width(&chip_segments) - 1).max(1);
         rendered.push_str(&" ".repeat(padding as usize));
-        rendered.push_str(&highlighted_label(theme, &chip_text));
+        rendered.push_str(&segments_to_text(theme, &chip_segments, ""));
+        rendered.push(' ');
     }
     rendered
 }
@@ -420,29 +659,25 @@ pub fn render_rule(theme: &Theme, width: isize) -> String {
 }
 
 pub fn render_footer(theme: &Theme, width: isize, hints: &[(&str, &str)], counter: &str) -> String {
+    let pair = |key: &str, label: &str| -> Vec<Segment> {
+        let mut out = vec![Segment::new("muted", key.to_string())];
+        if !label.is_empty() {
+            out.push(Segment::new("unknown", format!(" {}", label)));
+        }
+        out
+    };
+    let counter_width = display_width(counter) as isize;
     let mut segments: Vec<Segment> = Vec::new();
     for (index, (key, label)) in hints.iter().enumerate() {
-        if index > 0 {
-            segments.push(Segment::new("unknown", "  "));
+        let mut next = if index > 0 { vec![Segment::new("unknown", "   ")] } else { Vec::new() };
+        next.extend(pair(key, label));
+        // A hint goes whole or not at all: never a key without its label.
+        if plain_width(&segments) + plain_width(&next) + counter_width + 2 > width {
+            break;
         }
-        segments.push(Segment::new("muted", *key));
-        if !label.is_empty() {
-            segments.push(Segment::new("unknown", format!(" {}", label)));
-        }
+        segments.extend(next);
     }
-    let mut used = plain_width(&segments);
-    let counter_width = display_width(counter) as isize;
-    while !segments.is_empty() && used + counter_width + 2 > width {
-        segments.pop();
-        while let Some(last) = segments.last() {
-            if last.role == "unknown" && pystr::strip(&last.text).is_empty() {
-                segments.pop();
-            } else {
-                break;
-            }
-        }
-        used = plain_width(&segments);
-    }
+    let used = plain_width(&segments);
     let padding = (width - used - counter_width).max(1);
     segments.push(Segment::new("", " ".repeat(padding as usize)));
     segments.push(Segment::new("unknown", counter));
@@ -527,6 +762,71 @@ pub fn render_empty_state(theme: &Theme, width: isize, query: &str, has_items: b
     lines
 }
 
+/// Up to `lines` lines of `text` at `width`, broken at spaces where it can.
+fn wrap(text: &str, width: isize, lines: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text.trim().to_string();
+    while !rest.is_empty() && out.len() < lines {
+        if display_width(&rest) as isize <= width || out.len() + 1 == lines {
+            out.push(truncate(&rest, width));
+            break;
+        }
+        let chars: Vec<char> = rest.chars().collect();
+        let mut cut = 0;
+        let mut seen = 0;
+        for (index, c) in chars.iter().enumerate() {
+            seen += display_width(&c.to_string()) as isize;
+            if seen > width {
+                break;
+            }
+            if *c == ' ' {
+                cut = index;
+            }
+        }
+        if cut == 0 {
+            cut = (width.max(1) as usize).min(chars.len());
+        }
+        out.push(chars[..cut].iter().collect::<String>().trim_end().to_string());
+        rest = chars[cut..].iter().collect::<String>().trim_start().to_string();
+    }
+    out
+}
+
+/// The preview's second line: what the row is, in a few words, and the path
+/// it runs in (kept separate, so a long one loses its start, not its end).
+fn preview_facts(item: &Item) -> (Vec<Segment>, String, String) {
+    let mut lead = Vec::new();
+    let word = status_word(&item.status);
+    if !word.is_empty() && (item.kind == KIND_AGENT || item.kind == KIND_SPACE) {
+        lead.push(Segment::new(status_role(&item.status), format!("{} {}", crate::theme::status_glyph(&item.status), word)));
+    }
+    let mut facts: Vec<String> = Vec::new();
+    match item.kind {
+        KIND_COMMAND => {
+            facts.push(item.subtitle.clone());
+            if !item.binding.is_empty() {
+                facts.push(item.binding.replace('+', " "));
+            }
+        }
+        KIND_SPACE => facts.push(item.subtitle.clone()),
+        _ => {
+            if let Some(agent) = item.agent.as_deref().filter(|a| !a.is_empty()) {
+                facts.push(agent.to_string());
+            }
+            if let Some(name) = item.agent_name.as_deref().filter(|n| !n.is_empty()) {
+                facts.push(format!("@{}", name));
+            }
+            let place = if !item.subtitle.is_empty() { &item.subtitle } else { &item.workspace_label };
+            facts.retain(|f| !f.is_empty());
+            return (lead, facts.join(" · "), crate::items::shorten_path(place));
+        }
+    }
+    facts.retain(|f| !f.is_empty());
+    (lead, facts.join(" · "), String::new())
+}
+
+/// The right column: the row's title (wrapping once), what it is, then its
+/// body -- the pane's tail, or `lines` as given for rows that have no pane.
 pub fn render_preview(
     theme: &Theme,
     item: Option<&Item>,
@@ -540,24 +840,47 @@ pub fn render_preview(
     }
     let Some(item) = item else { return vec![String::new(); height as usize] };
     let mut out: Vec<String> = Vec::new();
-    let mut header = vec![Segment::bold("text", truncate(&item.title, width), true)];
-    let room = width - plain_width(&header) - display_width(DETAIL_SEP) as isize;
-    if !item.detail.is_empty() && room >= MIN_DETAIL {
-        header.push(Segment::new("unknown", DETAIL_SEP));
-        header.push(Segment::new("muted", truncate(&item.detail, room)));
+    let (title, _) = clean_title(&item.title);
+    for line in wrap(&title, width, 2) {
+        out.push(segments_to_text(theme, &[Segment::bold("text", line, true)], ""));
     }
-    out.push(segments_to_text(theme, &header, ""));
-    let subtitle = if !item.subtitle.is_empty() { &item.subtitle } else { &item.workspace_label };
-    out.push(if !subtitle.is_empty() {
-        segments_to_text(theme, &[Segment::new("muted", truncate_middle(subtitle, width))], "")
-    } else {
-        String::new()
-    });
+    let (mut facts, rest, path) = preview_facts(item);
+    for (text, keep_end) in [(rest, false), (path, true)] {
+        if text.is_empty() {
+            continue;
+        }
+        let sep = if facts.is_empty() { "" } else { " · " };
+        let room = width - plain_width(&facts) - display_width(sep) as isize;
+        if room < MIN_DETAIL {
+            break;
+        }
+        let shown = if !keep_end || display_width(&text) as isize <= room {
+            truncate_middle(&text, room)
+        } else {
+            let chars: Vec<char> = text.chars().collect();
+            let mut tail: String = chars[chars.len().saturating_sub((room - 1).max(0) as usize)..].iter().collect();
+            while display_width(&tail) as isize > room - 1 {
+                tail.remove(0);
+            }
+            format!("…{}", tail)
+        };
+        facts.push(Segment::new("unknown", sep));
+        facts.push(Segment::new("muted", shown));
+    }
+    out.push(segments_to_text(theme, &facts, ""));
     out.push(segments_to_text(theme, &[Segment::new("unknown", "─".repeat(width as usize))], ""));
 
     let body_height = height - out.len() as isize;
     if body_height <= 0 {
         out.truncate(height as usize);
+        return out;
+    }
+    // Spaces and commands have no pane to tail: their lines read from the top.
+    if item.kind == KIND_SPACE || item.kind == KIND_COMMAND {
+        for line in lines.iter().take(body_height as usize) {
+            out.push(segments_to_text(theme, &[Segment::new("muted", truncate(line, width))], ""));
+        }
+        out.resize(height as usize, String::new());
         return out;
     }
     let body: Vec<String> = if loading && lines.is_empty() {
@@ -597,7 +920,7 @@ pub fn scrollbar_column(total: isize, visible: isize, offset: isize, height: isi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{score_item, Memo, PLACEHOLDER};
+    use crate::app::{score_item, Memo, LEGEND, PLACEHOLDER};
     use crate::fuzzy::{split_query, Term};
     use crate::items::build_items;
     use crate::textutil::{strip_ansi, visible_width};
@@ -665,14 +988,14 @@ mod tests {
 
     #[test]
     fn query_is_echoed_in_the_input_row() {
-        let row = render_input(&theme(), "week", 4, 108, PLACEHOLDER, "everything", PROMPT);
+        let row = render_input(&theme(), "week", 4, 108, PLACEHOLDER, LEGEND, &Chip::quiet("everything"), PROMPT);
         assert!(row.contains("week"));
     }
 
     #[test]
     fn placeholder_appears_only_when_empty() {
-        let empty = render_input(&theme(), "", 0, 108, PLACEHOLDER, "everything", PROMPT);
-        let typed = render_input(&theme(), "week", 4, 108, PLACEHOLDER, "everything", PROMPT);
+        let empty = render_input(&theme(), "", 0, 108, PLACEHOLDER, LEGEND, &Chip::default(), PROMPT);
+        let typed = render_input(&theme(), "week", 4, 108, PLACEHOLDER, LEGEND, &Chip::quiet("everything"), PROMPT);
         assert!(empty.contains("search everything"));
         assert!(!typed.contains("search everything"));
     }
@@ -680,12 +1003,16 @@ mod tests {
     #[test]
     fn top_bar_highlights_the_active_filter() {
         let accent = theme().fg("accent").to_string();
-        let all = render_input(&theme(), "", 0, 108, PLACEHOLDER, "everything", PROMPT);
-        let agents = render_input(&theme(), "", 0, 108, PLACEHOLDER, "@ agents", PROMPT);
-        assert!(all.contains(&format!("{} everything ", accent)));
-        assert!(strip_ansi(&all).contains("everything"));
-        assert!(agents.contains(&format!("{} @ agents ", accent)));
+        let all = render_input(&theme(), "", 0, 108, PLACEHOLDER, LEGEND, &Chip::default(), PROMPT);
+        let agents = render_input(&theme(), "", 0, 108, "search agents…", &[], &Chip::loud("@ agents"), PROMPT);
+        // Everything is the resting state: no chip until a filter narrows.
+        assert!(!strip_ansi(&all).contains("everything …"));
+        assert!(!all.contains(&format!("{}everything", accent)));
+        assert!(agents.contains(&format!("{}@ agents", accent)));
         assert!(strip_ansi(&agents).contains("@ agents"));
+        let quiet = render_input(&theme(), "week", 4, 108, PLACEHOLDER, LEGEND, &Chip::quiet("everything"), PROMPT);
+        assert!(strip_ansi(&quiet).contains("everything"));
+        assert!(!quiet.contains(&format!("{}everything", accent)));
     }
 
     #[test]
@@ -752,7 +1079,8 @@ mod tests {
         let item = items().into_iter().find(|i| !i.detail.is_empty()).unwrap();
         let first = item.detail.split_whitespace().next().unwrap().to_string();
         let r = matched_row(&item, &first);
-        assert!(draw(&theme(), &item, &r, 120, false, None).contains("\x1b[4m"));
+        let theme = theme();
+        assert!(draw(&theme, &item, &r, 120, false, None).contains(&format!("{}{}", BOLD, theme.fg("match"))));
     }
 
     #[test]
@@ -762,20 +1090,21 @@ mod tests {
         let name = item.agent_name.clone().unwrap();
         let r = matched_row(&item, &name);
         let rendered = draw(&theme, &item, &r, 120, false, None);
-        assert!(rendered.contains(&format!("\x1b[4m{}{}", theme.fg("match"), name)));
+        assert!(rendered.contains(&format!("{}{}{}", BOLD, theme.fg("match"), name)));
         for width in (20..130).step_by(3) {
             assert_eq!(visible_width(&draw(&theme, &item, &r, width, false, Some(90.0))) as isize, width, "width {}", width);
         }
     }
 
     #[test]
-    fn matched_characters_are_underlined_and_the_rest_is_not() {
+    fn matched_characters_are_coloured_and_bold_not_underlined() {
         let theme = theme();
         let mut item = items().remove(0);
         item.title = "week loading".into();
         let r = draw(&theme, &item, &row(&[0, 1, 2, 3]), 60, false, None);
-        assert!(r.contains(&format!("\x1b[4m{}week", theme.fg("match"))));
-        assert!(!r.contains(&format!("\x1b[4m{} loading", theme.fg("match"))));
+        assert!(r.contains(&format!("{}{}week", BOLD, theme.fg("match"))));
+        assert!(!r.contains(&format!("{}{} loading", BOLD, theme.fg("match"))));
+        assert!(!r.contains(UNDERLINE));
         assert_eq!(visible_width(&r), 60);
     }
 
@@ -851,7 +1180,9 @@ mod tests {
         let theme = theme();
         let item = items().into_iter().find(|i| i.agent_name.as_deref().is_some_and(|n| !n.is_empty())).unwrap();
         let rendered = draw(&theme, &item, &row(&[]), 120, false, None);
-        assert!(rendered.contains(&format!("{}@battery", theme.fg("agent_claude"))));
+        assert!(rendered.contains(&format!("{}@", theme.fg("agent_claude"))));
+        assert!(rendered.contains(&format!("{}battery", theme.fg("agent_claude"))));
+        assert!(strip_ansi(&rendered).contains("@battery"));
     }
 
     #[test]
@@ -872,7 +1203,7 @@ mod tests {
     #[test]
     fn input_row_fits() {
         for width in [20, 40, 80, 120] {
-            let r = render_input(&theme(), "hello", 5, width, "placeholder text", "@ agents", PROMPT);
+            let r = render_input(&theme(), "hello", 5, width, "placeholder text", LEGEND, &Chip::loud("@ agents"), PROMPT);
             assert!(visible_width(&r) as isize <= width);
         }
     }
@@ -880,7 +1211,7 @@ mod tests {
     #[test]
     fn rename_prompt_and_hint_fit() {
         for width in [20, 40, 80, 120] {
-            let r = render_input(&theme(), "new name", 8, width, "old name", "⏎ save · esc keep", "rename ❯");
+            let r = render_input(&theme(), "new name", 8, width, "old name", &[], &Chip::loud("⏎ save · esc keep"), "rename ❯");
             assert!(visible_width(&r) as isize <= width);
             assert!(strip_ansi(&r).contains("rename"));
         }

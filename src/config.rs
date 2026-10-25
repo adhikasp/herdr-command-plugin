@@ -96,7 +96,7 @@ impl Config {
             auto_titles: get("auto_titles").map(|v| v.is_true()).unwrap_or(true),
             lowercase_titles: get("lowercase_titles").map(|v| v.is_true()).unwrap_or(false),
             tab_status: get("tab_status").map(|v| v.is_true()).unwrap_or(false),
-            running_time: get("running_time").map(|v| !v.is_false()).unwrap_or(true),
+            running_time: get("running_time").map(|v| v.is_true()).unwrap_or(false),
             scope: get("scope")
                 .and_then(|v| v.as_str())
                 .and_then(|name| SCOPES.iter().copied().find(|scope| *scope == name))

@@ -180,11 +180,11 @@ fn command_item(id: &str, title: &str, category: &str, hint: &str, search: &[Str
     item
 }
 
-/// A command row whose detail is its key binding: shown, but not searched,
-/// since "prefix+v" would make every "p" or "pi" hit half the palette.
+/// A herdr command row with its key binding: shown at the row's right, but not
+/// searched, since "prefix+v" would make every "p" or "pi" hit half the palette.
 fn bound_command_item(id: &str, title: &str, category: &str, binding: &str, argv: Vec<String>) -> Item {
-    let mut item = command_item(id, title, category, binding, &[], argv);
-    item.unsearch(binding);
+    let mut item = command_item(id, title, category, "", &[], argv);
+    item.binding = binding.to_string();
     item
 }
 
@@ -266,7 +266,8 @@ mod tests {
     #[test]
     fn a_key_binding_is_shown_but_not_searched() {
         let item = bound_command_item("zoom", "Toggle zoom", "Pane", "prefix+z", argv());
-        assert_eq!(item.detail, "prefix+z");
+        assert_eq!(item.binding, "prefix+z");
+        assert!(item.detail.is_empty());
         assert!(!item.fields.iter().any(|f| f == "prefix+z"));
         assert_eq!(item.detail_field, -1);
         assert_eq!(item.fields.len(), item.prepared.len());

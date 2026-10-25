@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.14.0
+
+- A calmer list. Every row has the same columns: a kind column (agent logo,
+  `#` space, `$` shell, `%` pane, `>` command), status for agents and spaces,
+  the title, then `@name` and the place (`workspace/folder`) in one column that
+  lines up down the list. Status words, `current` and kind labels are gone from
+  the right side; the tab you are in is marked with `›`.
+- Titles stay in the text color whatever the status, so the glyph carries it;
+  matches are bold and colored, no longer underlined.
+- Command rows show their key binding at the right (`prefix ⇧H`), or the plugin
+  they come from.
+- The chip only speaks when a filter narrows the list, and reads the same
+  however the filter was entered (`# spaces`, `@ agents`, `% panes`,
+  `> commands`); a scoped placeholder says what it searches.
+- The scrollbar sits in the divider beside the preview, the footer drops whole
+  hints and counts what the active filter could show, and the preview header
+  shows status, agent and path, the tabs of a workspace, or what a command does.
+- Running time is off by default; `"running_time": true` brings it back.
+
 ## 0.13.0
 
 - Renamed to **herdr-command-plugin**: the repository, the plugin id, the
