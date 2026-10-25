@@ -3,8 +3,9 @@ name = "herdr-command-plugin"
 version = "0.13.0"
 edition = "2021"
 rust-version = "1.88"
-description = "Cmd+K command bar for Herdr with agent icons, fuzzy search, and automatic tab titles"
+description = "Cmd+K for Herdr: fuzzy-find any space, tab, pane, agent or command, with agent icons and automatic tab titles"
 license = "MIT"
+repository = "https://github.com/adhikasp/herdr-command-plugin"
 publish = false
 
 [[bin]]

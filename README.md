@@ -504,9 +504,11 @@ completes real paths, remembers where you work, and starts the agent for you.
 
 ## Credits
 
-Forked from [jeffarese/herdr-bar](https://github.com/jeffarese/herdr-bar), which
-built the bar, the tab titles and the agent icons. This fork adds the command
-palette, everything-search with kind prefixes, and modal mode.
+herdr-command-plugin grew out of Jeff Arese's
+[herdr-bar](https://github.com/jeffarese/herdr-bar), which built the bar, the
+tab titles and the agent icons, and is released under the same MIT license. The
+command palette, everything-search with kind prefixes, and modal mode are new
+here.
 
 ## License
 
