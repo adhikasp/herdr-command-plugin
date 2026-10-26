@@ -17,6 +17,8 @@ pub const KIND_PANE: &str = "pane";
 pub const KIND_TAB: &str = "tab";
 pub const KIND_SPACE: &str = "space";
 pub const KIND_COMMAND: &str = "command";
+/// A machine's heading in the resting tree: a label, never searched or selected.
+pub const KIND_MACHINE: &str = "machine";
 
 pub fn status_order(status: &str) -> i64 {
     match status {
@@ -160,6 +162,29 @@ impl Item {
     pub fn status_rank(&self) -> i64 {
         status_order(&self.status)
     }
+}
+
+/// A tree heading row. `status` is the most urgent status among its rows.
+pub fn header(kind: &'static str, key: String, title: String, machine: Option<&str>, workspace_id: &str, status: &str) -> Item {
+    let mut item = Item::new(ItemInit {
+        kind,
+        key,
+        title,
+        detail: String::new(),
+        subtitle: String::new(),
+        workspace_id: workspace_id.to_string(),
+        workspace_label: String::new(),
+        tab_id: None,
+        pane_id: None,
+        agent: None,
+        agent_name: None,
+        status: status.to_string(),
+        tab_number: None,
+        focused: false,
+        extra_terms: Vec::new(),
+    });
+    item.machine = machine.map(str::to_string);
+    item
 }
 
 pub fn shorten_path(path: &str) -> String {

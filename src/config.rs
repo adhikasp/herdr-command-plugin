@@ -29,6 +29,8 @@ pub struct Config {
     pub scope: &'static str,
     /// Open with the row you are in selected, not the one you came from.
     pub select_current: bool,
+    /// Group the resting list as a tree: machine > space > tabs and agents.
+    pub tree: bool,
     /// Let the next session in a pane take over the task title written for
     /// the one before it.
     pub follow_new_sessions: bool,
@@ -102,6 +104,7 @@ impl Config {
                 .and_then(|name| SCOPES.iter().copied().find(|scope| *scope == name))
                 .unwrap_or("all"),
             select_current: get("select_current").map(|v| v.is_true()).unwrap_or(false),
+            tree: get("tree").map(|v| !v.is_false()).unwrap_or(true),
             follow_new_sessions: get("follow_new_sessions").map(|v| v.is_true()).unwrap_or(false),
             modal: get("modal").map(|v| v.is_true()).unwrap_or(false),
         }

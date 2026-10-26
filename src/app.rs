@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::fuzzy::{match_prepared, split_query, Match, Term};
 use crate::fxhash::FxHashMap;
 use crate::icons;
-use crate::items::{build_items, build_pane_items, Item, KIND_AGENT, KIND_COMMAND, KIND_PANE, KIND_SPACE, KIND_TAB};
+use crate::items::{build_items, build_pane_items, Item, KIND_AGENT, KIND_COMMAND, KIND_MACHINE, KIND_PANE, KIND_SPACE, KIND_TAB};
 use crate::keys::{Event, KeyDecoder, MouseKind};
 use crate::mru::Recents;
 use crate::paint::Painter;
@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 use std::time::Instant;
 
-pub const SCOPES: &[&str] = &["all", "agent", "pane", "tab", "blocked", "command"];
+pub const SCOPES: &[&str] = &["all", "agent", "pane", "tab", "working", "idle", "blocked", "command"];
 
 fn scope_sigil(text: &str) -> Option<&'static str> {
     Some(match text {
@@ -33,13 +33,20 @@ fn scope_sigil(text: &str) -> Option<&'static str> {
     })
 }
 
+/// The kind prefixes that filter agents by what they are doing.
+const PREFIX_WORKING: &str = "working";
+const PREFIX_IDLE: &str = "idle";
+const PREFIX_ATTENTION: &str = "attention";
+
 fn scope_chip(scope: &str) -> &'static str {
     match scope {
         "all" => "everything",
         "agent" => "@ agents",
         "pane" => "% panes",
         "tab" => "$ shells",
-        "blocked" => "! needs you",
+        "working" => "◐ working",
+        "idle" => "✓ idle",
+        "blocked" => "! attention",
         "command" => "> commands",
         _ => "",
     }
@@ -50,8 +57,11 @@ fn scope_chip(scope: &str) -> &'static str {
 /// row, agents included, since an agent row is its tab.
 fn prefix_kind(word: &str) -> Option<&'static str> {
     Some(match word {
-        "s" | "w" | "ws" | "space" | "spaces" | "workspace" | "workspaces" => KIND_SPACE,
-        "a" | "agent" | "agents" => KIND_AGENT,
+        "s" | "ws" | "space" | "spaces" | "workspace" | "workspaces" => KIND_SPACE,
+        "agent" | "agents" => KIND_AGENT,
+        "w" | "working" => PREFIX_WORKING,
+        "i" | "idle" => PREFIX_IDLE,
+        "a" | "attention" | "needs" => PREFIX_ATTENTION,
         "t" | "tab" | "tabs" => KIND_TAB,
         "p" | "pane" | "panes" => KIND_PANE,
         "c" | "cmd" | "cmds" | "command" | "commands" | ">" | ":" => KIND_COMMAND,
@@ -89,6 +99,9 @@ fn prefix_chip(kind: &str) -> &'static str {
         KIND_TAB => "tabs",
         KIND_PANE => "panes",
         KIND_COMMAND => "commands",
+        PREFIX_WORKING => "working",
+        PREFIX_IDLE => "idle",
+        PREFIX_ATTENTION => "attention",
         _ => "",
     }
 }
@@ -101,6 +114,9 @@ fn prefix_label(kind: &str) -> &'static str {
         KIND_TAB => "tabs",
         KIND_PANE => "% panes",
         KIND_COMMAND => "> commands",
+        PREFIX_WORKING => "◐ working",
+        PREFIX_IDLE => "✓ idle",
+        PREFIX_ATTENTION => "! attention",
         _ => "",
     }
 }
@@ -111,6 +127,8 @@ fn scope_noun(scope: &str) -> &'static str {
         "agent" => "agents",
         "pane" => "panes",
         "tab" => "shells",
+        "working" => "working agents",
+        "idle" => "idle agents",
         "blocked" => "what needs you",
         "command" => "commands",
         _ => "everything",
@@ -118,6 +136,13 @@ fn scope_noun(scope: &str) -> &'static str {
 }
 
 fn of_prefix_kind(kind: &str, item: &Item) -> bool {
+    let agent = item.kind == KIND_AGENT;
+    match kind {
+        PREFIX_WORKING => return agent && item.status == "working",
+        PREFIX_IDLE => return agent && item.status == "idle",
+        PREFIX_ATTENTION => return agent && matches!(item.status.as_str(), "blocked" | "done"),
+        _ => {}
+    }
     item.kind == kind || (kind == KIND_TAB && item.kind == KIND_AGENT)
 }
 
@@ -130,9 +155,18 @@ pub const STATUS_TTL: f64 = 2.5;
 pub const PLACEHOLDER: &str = "search everything…";
 pub const PLACEHOLDER_NORMAL: &str = "type to search";
 /// The kind prefixes, shown after the placeholder while there is room.
-pub const LEGEND: &[(&str, &str)] = &[("s", "space"), ("a", "agent"), ("t", "tab"), ("p", "pane"), ("c", "command")];
-pub const LEGEND_NORMAL: &[(&str, &str)] =
-    &[("s", "space"), ("a", "agent"), ("t", "tab"), ("p", "pane"), ("c", "command"), ("j/k", "move")];
+pub const LEGEND: &[(&str, &str)] =
+    &[("s", "space"), ("w", "working"), ("i", "idle"), ("a", "attention"), ("t", "tab"), ("p", "pane"), ("c", "command")];
+pub const LEGEND_NORMAL: &[(&str, &str)] = &[
+    ("s", "space"),
+    ("w", "working"),
+    ("i", "idle"),
+    ("a", "attention"),
+    ("t", "tab"),
+    ("p", "pane"),
+    ("c", "command"),
+    ("j/k", "move"),
+];
 
 /// time.monotonic(): seconds on a clock that only moves forward. It starts
 /// far from zero, as Python's does, so "never" (0.0) is long ago.
@@ -262,6 +296,8 @@ pub struct Bar {
     pub pool: Vec<Item>,
     item_count: usize,
     command_start: usize,
+    /// Where the tree headings start: the pool's tail, after the commands.
+    header_start: usize,
     /// With `modal` on: whether keys type a query (true) or navigate (false).
     pub searching: bool,
     plugin_actions_seen: bool,
@@ -315,6 +351,7 @@ impl Bar {
             pool: Vec::new(),
             item_count: 0,
             command_start: 0,
+            header_start: 0,
             searching: !modal,
             plugin_actions_seen: false,
             prefix_used: None,
@@ -361,16 +398,73 @@ impl Bar {
 
     /// Swap the machines' rows into the pool, right after the local ones.
     fn merge_remote(&mut self) {
-        let Some(remote) = &self.remote else { return };
-        let (version, rows) = remote.rows();
-        self.remote_seen = version;
-        let pane_rows = self.command_start - self.item_count;
-        let mut kept: Vec<Item> = self.pool.drain(..self.item_count).filter(|item| item.machine.is_none()).collect();
-        kept.extend(rows);
-        self.item_count = kept.len();
-        self.command_start = self.item_count + pane_rows;
-        kept.append(&mut self.pool);
-        self.pool = kept;
+        if let Some(remote) = &self.remote {
+            let (version, rows) = remote.rows();
+            self.remote_seen = version;
+            let pane_rows = self.command_start - self.item_count;
+            self.pool.truncate(self.header_start.min(self.pool.len()));
+            let mut kept: Vec<Item> =
+                self.pool.drain(..self.item_count).filter(|item| item.machine.is_none()).collect();
+            kept.extend(rows);
+            self.item_count = kept.len();
+            self.command_start = self.item_count + pane_rows;
+            kept.append(&mut self.pool);
+            self.pool = kept;
+            self.header_start = self.pool.len();
+        }
+        self.rebuild_headers();
+    }
+
+    /// The tree's headings, in tree order, at the pool's tail: per machine
+    /// (when there are saved SSH machines) its heading, then one per space
+    /// that has rows. A space heading jumps like a space row does.
+    fn rebuild_headers(&mut self) {
+        self.pool.truncate(self.header_start.min(self.pool.len()));
+        self.header_start = self.pool.len();
+        let mut machines: Vec<Option<String>> = vec![None];
+        for item in &self.pool[..self.command_start] {
+            if item.machine.is_some() && !machines.contains(&item.machine) {
+                machines.push(item.machine.clone());
+            }
+        }
+        let with_machines = machines.len() > 1;
+        let mut headers: Vec<Item> = Vec::new();
+        for machine in machines {
+            let mut spaces: Vec<(String, String, &str)> = Vec::new();
+            for item in self.pool[..self.command_start].iter().filter(|i| i.machine == machine) {
+                if !matches!(item.kind, KIND_AGENT | KIND_TAB | KIND_PANE) {
+                    continue;
+                }
+                let at = match spaces.iter().position(|(id, _, _)| *id == item.workspace_id) {
+                    Some(at) => at,
+                    None => {
+                        let label = match &machine {
+                            Some(name) => item.workspace_label.strip_prefix(&format!("{}/", name)).unwrap_or(&item.workspace_label),
+                            None => &item.workspace_label,
+                        };
+                        let label = if label.is_empty() { item.workspace_id.clone() } else { label.to_string() };
+                        spaces.push((item.workspace_id.clone(), label, "none"));
+                        spaces.len() - 1
+                    }
+                };
+                if item.kind == KIND_AGENT && item.status_rank() < crate::items::status_order(spaces[at].2) {
+                    spaces[at].2 = item.status.as_str();
+                }
+            }
+            if spaces.is_empty() {
+                continue;
+            }
+            let name = machine.clone().unwrap_or_else(local_name);
+            if with_machines {
+                let worst = spaces.iter().map(|(_, _, s)| *s).min_by_key(|s| crate::items::status_order(s)).unwrap_or("none");
+                headers.push(crate::items::header(KIND_MACHINE, format!("machine:{}", name), name.clone(), None, "", worst));
+            }
+            for (id, label, status) in spaces {
+                let key = format!("group:{}/{}", name, id);
+                headers.push(crate::items::header(KIND_SPACE, key, label, machine.as_deref(), &id, status));
+            }
+        }
+        self.pool.extend(headers);
     }
 
     pub fn items(&self) -> &[Item] {
@@ -451,6 +545,7 @@ impl Bar {
         }
         self.item_count = pool.item_count;
         self.command_start = pool.command_start;
+        self.header_start = pool.items.len();
         let old = std::mem::replace(&mut self.pool, pool.items);
         crate::par::drop_aside(old, self.pool.len() >= crate::par::MIN_PARALLEL);
         self.merge_remote();
@@ -478,14 +573,29 @@ impl Bar {
                 Some(index) => self.selected = index,
                 None => self.selected = 0,
             }
+        } else if self.tree_shown() {
+            // The tree opens on the tab or agent you are in.
+            if let Some(current) = self.current_key.clone() {
+                if let Some(index) = self.rows.iter().position(|row| !row.header && self.pool[row.item].key == current) {
+                    self.selected = index;
+                }
+            }
         }
         self.selected = if self.rows.is_empty() { 0 } else { self.selected.min(self.rows.len() - 1) };
+        if !self.rows.is_empty() {
+            self.selected = self.settle(self.selected, 1);
+        }
         self.dirty = true;
     }
 
     fn in_scope(&self, item: &Item) -> bool {
+        if item.kind == KIND_MACHINE {
+            return false;
+        }
         match self.scope {
             "agent" => item.kind == KIND_AGENT,
+            "working" => item.kind == KIND_AGENT && item.status == "working",
+            "idle" => item.kind == KIND_AGENT && item.status == "idle",
             "pane" => item.kind == KIND_PANE,
             "tab" => item.kind == KIND_TAB,
             "command" => item.kind == KIND_COMMAND,
@@ -520,14 +630,14 @@ impl Bar {
     fn candidates(&self, prefix: Option<&str>) -> Vec<usize> {
         let source: Vec<usize> = match (self.scope, prefix) {
             ("all", Some(kind)) => {
-                (0..self.pool.len()).filter(|&i| of_prefix_kind(kind, &self.pool[i])).collect()
+                (0..self.header_start).filter(|&i| of_prefix_kind(kind, &self.pool[i])).collect()
             }
             // Commands join everything once there is something to look for;
             // at rest the list stays the places you can jump to.
-            ("all", None) if !split_query(&self.query).is_empty() => (0..self.pool.len()).collect(),
+            ("all", None) if !split_query(&self.query).is_empty() => (0..self.header_start).collect(),
             ("all", None) => (0..self.command_start).collect(),
             ("pane", _) => (self.item_count..self.command_start).collect(),
-            ("command", _) => (self.command_start..self.pool.len()).collect(),
+            ("command", _) => (self.command_start..self.header_start).collect(),
             _ => (0..self.item_count).collect(),
         };
         source.into_iter().filter(|&i| self.in_scope(&self.pool[i])).collect()
@@ -536,11 +646,14 @@ impl Bar {
     fn filter(&self, prefix: Option<&str>) -> Vec<Row> {
         let candidates = self.candidates(prefix);
         let terms = split_query(self.search_text(prefix));
+        if terms.is_empty() && self.tree_wanted(prefix) {
+            return self.tree_rows(&candidates);
+        }
         if terms.is_empty() {
             return self
                 .resting_order(&candidates)
                 .into_iter()
-                .map(|item| Row { item, positions: Vec::new(), field_positions: BTreeMap::new() })
+                .map(|item| Row { item, ..Row::default() })
                 .collect();
         }
         let terms: Vec<Term> = terms.iter().map(|t| Term::new(t)).collect();
@@ -562,7 +675,7 @@ impl Bar {
                 let positions = by_field.get(&0).cloned().unwrap_or_default();
                 scored.push((
                     (-score, rank, item.status_rank(), char_len(&item.title)),
-                    Row { item: index, positions, field_positions: by_field },
+                    Row { item: index, positions, field_positions: by_field, ..Row::default() },
                 ));
             }
             scored
@@ -573,6 +686,95 @@ impl Bar {
         order.sort_by_key(|&at| scored[at].0);
         let mut rows: Vec<Option<Row>> = scored.drain(..).map(|(_, row)| Some(row)).collect();
         order.into_iter().filter_map(|at| rows[at].take()).collect()
+    }
+
+    /// Whether the list at rest is the tree: machine > space > tabs and agents.
+    /// The status filters keep it, pruned to the agents they name.
+    fn tree_wanted(&self, prefix: Option<&str>) -> bool {
+        self.config.tree
+            && matches!(self.scope, "all" | "working" | "idle" | "blocked")
+            && matches!(prefix, None | Some(PREFIX_WORKING | PREFIX_IDLE | PREFIX_ATTENTION))
+    }
+
+    /// The tree over these rows: each heading from the pool's tail followed
+    /// by the rows under it, and the headings of empty groups left out.
+    fn tree_rows(&self, rows: &[usize]) -> Vec<Row> {
+        let leaves: Vec<usize> =
+            rows.iter().copied().filter(|&i| !matches!(self.pool[i].kind, KIND_SPACE | KIND_COMMAND)).collect();
+        // (machine heading, [(space heading, rows)]) in the tail's order.
+        let mut machines: Vec<(Option<usize>, Vec<(usize, Vec<usize>)>)> = Vec::new();
+        for at in self.header_start..self.pool.len() {
+            let header = &self.pool[at];
+            if header.kind == KIND_MACHINE {
+                machines.push((Some(at), Vec::new()));
+                continue;
+            }
+            if machines.is_empty() {
+                machines.push((None, Vec::new()));
+            }
+            let mut under: Vec<usize> = leaves
+                .iter()
+                .copied()
+                .filter(|&i| self.pool[i].machine == header.machine && self.pool[i].workspace_id == header.workspace_id)
+                .collect();
+            if under.is_empty() {
+                continue;
+            }
+            under.sort_by_key(|&i| {
+                (self.pool[i].tab_number.unwrap_or(1 << 30), self.pool[i].kind == KIND_PANE)
+            });
+            if let Some((_, groups)) = machines.last_mut() {
+                groups.push((at, under));
+            }
+        }
+        let with_machines = machines.iter().any(|(machine, _)| machine.is_some());
+        let mut out = Vec::new();
+        for (machine, groups) in machines.into_iter().filter(|(_, groups)| !groups.is_empty()) {
+            if let Some(at) = machine {
+                out.push(Row { item: at, header: true, ..Row::default() });
+            }
+            let last_group = groups.len() - 1;
+            for (index, (header, under)) in groups.into_iter().enumerate() {
+                let (arm, stem) = match (with_machines, index == last_group) {
+                    (false, _) => ("", ""),
+                    (true, true) => ("└─ ", "   "),
+                    (true, false) => ("├─ ", "│  "),
+                };
+                out.push(Row { item: header, header: true, branch: arm.to_string(), ..Row::default() });
+                let last = under.len() - 1;
+                for (at, item) in under.into_iter().enumerate() {
+                    let leaf = if at == last { "└─ " } else { "├─ " };
+                    out.push(Row { item, branch: format!("{}{}", stem, leaf), ..Row::default() });
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether the rows are the tree, headings and all.
+    fn tree_shown(&self) -> bool {
+        self.rows.iter().any(|row| row.header)
+    }
+
+    fn selectable(&self, row: usize) -> bool {
+        self.pool[self.rows[row].item].kind != KIND_MACHINE
+    }
+
+    /// The closest row at or past `from` the cursor can rest on, looking the
+    /// way `dir` points first.
+    fn settle(&self, from: usize, dir: isize) -> usize {
+        let count = self.rows.len() as isize;
+        let dir = if dir == 0 { 1 } else { dir.signum() };
+        for step in [dir, -dir] {
+            let mut at = from as isize;
+            while (0..count).contains(&at) {
+                if self.selectable(at as usize) {
+                    return at as usize;
+                }
+                at += step;
+            }
+        }
+        from
     }
 
     fn resting_order(&self, items: &[usize]) -> Vec<usize> {
@@ -651,7 +853,7 @@ impl Bar {
         if wrap && delta.abs() == 1 {
             target = target.rem_euclid(count);
         }
-        self.selected = target.clamp(0, count - 1) as usize;
+        self.selected = self.settle(target.clamp(0, count - 1) as usize, delta);
         self.dirty = true;
     }
 
@@ -679,6 +881,9 @@ impl Bar {
                 Some(KIND_AGENT) => "agent",
                 Some(KIND_PANE) => "pane",
                 Some(KIND_COMMAND) => "command",
+                Some(PREFIX_WORKING) => "working",
+                Some(PREFIX_IDLE) => "idle",
+                Some(PREFIX_ATTENTION) => "blocked",
                 _ => "all",
             };
             self.prefix_used = None;
@@ -1100,6 +1305,9 @@ impl Bar {
         if target >= self.rows.len() as i128 {
             return None;
         }
+        if !self.selectable(target as usize) {
+            return None;
+        }
         if target == self.selected as i128 {
             return Some(Outcome::Confirm);
         }
@@ -1364,6 +1572,10 @@ impl Bar {
         let (selected, mut offset) = (self.selected as isize, self.offset as isize);
         if selected < offset {
             offset = selected;
+            // Keep the headings above the first row in view.
+            while offset > 0 && self.rows[offset as usize - 1].header {
+                offset -= 1;
+            }
         } else if selected >= offset + height {
             offset = selected - height + 1;
         }
@@ -1391,7 +1603,7 @@ impl Bar {
         let in_divider = layout.preview_width != 0;
         let content_width = layout.list_width - if marks.is_empty() || in_divider { 0 } else { 2 };
         let mut style = render::RowStyle {
-            show_workspace: self.workspace_count > 1,
+            show_workspace: self.workspace_count > 1 && !self.tree_shown(),
             tier: render::meta_tier(content_width),
             place_width: 0,
         };
@@ -1473,6 +1685,9 @@ impl Bar {
         }
         // Out of what the active filter could show, so a filter that hides
         // nothing reads as whole.
+        if self.tree_shown() {
+            return render::render_footer(&self.theme, width, &hints, &self.rows.iter().filter(|r| !r.header).count().to_string());
+        }
         let total = self.candidates(self.prefix_used).len();
         let shown = self.rows.len();
         let counter = if shown != total { format!("{}/{}", shown, total) } else { total.to_string() };
@@ -1607,6 +1822,16 @@ impl Bar {
         }
         (deadline - now).max(0.01)
     }
+}
+
+/// This machine's name, for the tree's heading once SSH machines join it.
+fn local_name() -> String {
+    let name = std::env::var("HOSTNAME")
+        .ok()
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    name.unwrap_or_else(|| "local".to_string())
 }
 
 /// Focus whatever the row points at. A workspace row opens a new tab there.
@@ -1949,7 +2174,15 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn bar_with(snapshot: Value, config: Config, recents: Recents) -> T {
+    /// Most tests are about the flat list, so a bar is flat unless it is built
+    /// with `tree_bar_with`.
+    fn bar_with(snapshot: Value, mut config: Config, recents: Recents) -> T {
+        config.tree = false;
+        tree_bar_with(snapshot, config, recents)
+    }
+
+    #[cfg(unix)]
+    fn tree_bar_with(snapshot: Value, config: Config, recents: Recents) -> T {
         let env = testutil::env_lock();
         // Command rows show herdr's key bindings; keep the machine's own out.
         let mut vars = testutil::EnvVars::new();
@@ -2269,7 +2502,10 @@ mod tests {
     #[test]
     fn a_kind_word_followed_by_a_space_is_a_prefix() {
         assert_eq!(kind_prefix("s pilf"), Some((KIND_SPACE, "pilf")));
-        assert_eq!(kind_prefix("a codex"), Some((KIND_AGENT, "codex")));
+        assert_eq!(kind_prefix("agent codex"), Some((KIND_AGENT, "codex")));
+        assert_eq!(kind_prefix("w codex"), Some((PREFIX_WORKING, "codex")));
+        assert_eq!(kind_prefix("i codex"), Some((PREFIX_IDLE, "codex")));
+        assert_eq!(kind_prefix("a codex"), Some((PREFIX_ATTENTION, "codex")));
         assert_eq!(kind_prefix("t logs"), Some((KIND_TAB, "logs")));
         assert_eq!(kind_prefix("p web"), Some((KIND_PANE, "web")));
         assert_eq!(kind_prefix("c split"), Some((KIND_COMMAND, "split")));
@@ -2277,7 +2513,7 @@ mod tests {
 
     #[test]
     fn kind_words_have_long_forms() {
-        for word in ["s", "w", "ws", "space", "spaces", "workspace", "workspaces"] {
+        for word in ["s", "ws", "space", "spaces", "workspace", "workspaces"] {
             assert_eq!(kind_prefix(&format!("{} x", word)), Some((KIND_SPACE, "x")), "{}", word);
         }
         for word in ["cmd", "command", "commands", ">", ":"] {
@@ -2311,7 +2547,7 @@ mod tests {
     fn a_colon_can_end_the_kind_word() {
         assert_eq!(kind_prefix("s:pilf"), Some((KIND_SPACE, "pilf")));
         assert_eq!(kind_prefix("space: pilf"), Some((KIND_SPACE, "pilf")));
-        assert_eq!(kind_prefix("a:"), Some((KIND_AGENT, "")));
+        assert_eq!(kind_prefix("agent:"), Some((KIND_AGENT, "")));
         assert_eq!(kind_prefix("cmd:split pane"), Some((KIND_COMMAND, "split pane")));
     }
 
@@ -2553,6 +2789,99 @@ mod tests {
         crate::textutil::strip_ansi(&bar.compose(120, 30).join("\n"))
     }
 
+    // -- the tree ---------------------------------------------------------------
+
+    #[cfg(unix)]
+    fn tree_bar() -> T {
+        tree_bar_with(pi_life_snapshot(), Config::default(), Recents::new(None))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_tree_groups_tabs_under_their_space() {
+        let mut t = tree_bar();
+        println!("{}", screen(&mut t.bar));
+        let heads: Vec<&str> =
+            t.bar.rows.iter().filter(|r| r.header).map(|r| t.bar.pool[r.item].title.as_str()).collect();
+        assert_eq!(heads.len(), 2, "{heads:?}");
+        assert!(t.bar.rows[0].header);
+        // Every leaf sits under the heading of its own space.
+        let mut space = String::new();
+        for row in &t.bar.rows {
+            let item = &t.bar.pool[row.item];
+            if row.header {
+                space = item.workspace_id.clone();
+            } else {
+                assert_eq!(item.workspace_id, space);
+                assert!(row.branch.ends_with("─ "));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_tree_opens_on_the_current_tab_or_agent() {
+        let t = tree_bar();
+        assert!(!t.bar.rows[t.bar.selected].header);
+        assert_eq!(Some(&t.bar.selected_item().key), t.bar.current_key.as_ref());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_space_heading_can_be_selected_to_open_a_tab_there() {
+        let mut t = tree_bar();
+        let at = t.bar.rows.iter().position(|r| r.header).unwrap();
+        t.bar.selected = at;
+        assert_eq!(t.bar.selected_item().kind, KIND_SPACE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_machine_heading_is_only_a_label() {
+        let mut t = tree_bar();
+        t.bar.pool.push(crate::items::header(KIND_MACHINE, "machine:x".into(), "x".into(), None, "", "none"));
+        t.bar.rows.insert(0, Row { item: t.bar.pool.len() - 1, header: true, ..Row::default() });
+        t.bar.selected = 0;
+        t.bar.move_by(1, true);
+        assert_ne!(t.bar.selected, 0);
+        t.bar.move_by(-1, true);
+        assert_ne!(t.bar.selected_item().kind, KIND_MACHINE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn typing_leaves_the_tree_for_ranked_matches() {
+        let mut t = tree_bar();
+        press(&mut t.bar, &[b"re"]);
+        assert!(t.bar.rows.iter().all(|r| !r.header));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn working_idle_and_attention_prefixes_keep_a_pruned_tree() {
+        for (prefix, wanted) in [("w ", &["working"][..]), ("i ", &["idle"]), ("a ", &["blocked", "done"])] {
+            let mut t = tree_bar();
+            press(&mut t.bar, &[prefix.as_bytes()]);
+            let leaves: Vec<&Item> =
+                t.bar.rows.iter().filter(|r| !r.header).map(|r| &t.bar.pool[r.item]).collect();
+            assert!(!leaves.is_empty(), "{prefix}");
+            assert!(leaves.iter().all(|i| i.kind == KIND_AGENT && wanted.contains(&i.status.as_str())), "{prefix}");
+            assert!(t.bar.rows.iter().any(|r| r.header), "{prefix}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_status_filters_are_scopes_too() {
+        let mut t = tree_bar();
+        for scope in ["working", "idle", "blocked"] {
+            while t.bar.scope != scope {
+                press(&mut t.bar, &[b"\t"]);
+            }
+            assert!(t.bar.rows.iter().filter(|r| !r.header).all(|r| t.bar.pool[r.item].kind == KIND_AGENT));
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_widened_search_says_why_in_the_chip() {
@@ -2581,7 +2910,7 @@ mod tests {
     #[test]
     fn tab_steps_on_from_the_kind_a_prefix_named() {
         let mut t = bar();
-        press(&mut t.bar, &[b"a re"]);
+        press(&mut t.bar, &[b"agent re"]);
         press(&mut t.bar, &[b"\t"]);
         assert_eq!(t.bar.scope, "pane");
         assert_eq!(t.bar.query, "re");

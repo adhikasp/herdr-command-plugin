@@ -105,7 +105,8 @@ two-second poll instead of an event stream. Tested on Windows 11 with herdr 0.9.
 | Key | Does |
 | --- | --- |
 | type | fuzzy search over everything, commands included; space separates terms, all of which must match |
-| `s ` `a ` `t ` `p ` `c ` before a search | narrow it to spaces / agents / tabs / named panes / commands: `s pilf` finds the `pi-life` space |
+| `s ` `t ` `p ` `c ` before a search | narrow it to spaces / tabs / named panes / commands: `s pilf` finds the `pi-life` space (`agent ` narrows to agents) |
+| `w ` `i ` `a ` before a search | only agents that are working / idle / need attention (waiting or done); with nothing after them the tree stays, pruned to those agents |
 | `>` or `:` on an empty query | the command palette: herdr's actions and every plugin action |
 | `↑` `↓`, `ctrl+p` `ctrl+n`, `ctrl+k` `ctrl+j` | move |
 | `enter` | jump to the selected row and close |
@@ -269,8 +270,9 @@ Optional. Write `config.json` in the plugin config directory
 | `follow_new_sessions` | `false` | `true` lets the next Claude or Codex session in a pane take over the task title written for the one before it, after `/clear`, a restart or a new terminal; a tab you renamed stays yours |
 | `tab_status` | `false` | opt in to agent logos and status glyphs in tab names; `false` restores labels still owned by the watcher |
 | `running_time` | `false` | `true` adds each row's running time (`47s`, `2h04m`), read once per pane with `process_info`/`ps`; off, the bar skips that reading and opens faster |
-| `scope` | `"all"` | the filter the bar opens with: `"agent"` (`@ agents`), `"pane"` (`% panes`), `"tab"` (`$ shells`), `"blocked"` (`! needs you`) or `"all"`; `backspace` on an empty query still clears it, and `ctrl+u` returns to it |
+| `scope` | `"all"` | the filter the bar opens with: `"agent"` (`@ agents`), `"pane"` (`% panes`), `"tab"` (`$ shells`), `"working"`, `"idle"`, `"blocked"` (`! attention`) or `"all"`; `backspace` on an empty query still clears it, and `ctrl+u` returns to it |
 | `modal` | `false` | `true` opens in a list mode where `j`/`k` move and typing anything else starts the search (see [Modal mode](#using-it)) |
+| `tree` | `true` | the list at rest is a tree, machine (with saved SSH machines) > space > tabs and agents, opening on the row you are in; `false` keeps the flat, unread-first list |
 | `select_current` | `false` | `true` opens with the row you are in selected instead of the one you came from; the order stays the same, so that row follows the recently visited ones |
 | `colors` | `{}` | role → `#rrggbb`, an ANSI name (`bright_blue`), or 0-255. Roles: `accent`, `match`, `text`, `muted`, `blocked`, `working`, `done`, `idle`, `unknown`, plus `agent_claude`, `agent_codex`, `agent_pi`, `agent_grok`, `agent_kimi`, `agent_gemini`, `agent_cursor`, `agent_opencode` |
 

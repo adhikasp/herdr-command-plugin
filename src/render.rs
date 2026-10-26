@@ -8,7 +8,7 @@
 
 use crate::age::format_age;
 use crate::icons;
-use crate::items::{Item, KIND_AGENT, KIND_COMMAND, KIND_PANE, KIND_SPACE};
+use crate::items::{Item, KIND_AGENT, KIND_COMMAND, KIND_MACHINE, KIND_PANE, KIND_SPACE};
 use crate::pyos;
 use crate::pystr;
 use crate::textutil::{display_width, pad, truncate, truncate_middle, window_positions};
@@ -40,11 +40,15 @@ pub const PREVIEW_MIN: isize = 28;
 pub const PREVIEW_MAX: isize = 56;
 
 /// An item plus where the query landed in it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Row {
     pub item: usize,
     pub positions: Vec<usize>,
     pub field_positions: BTreeMap<usize, Vec<usize>>,
+    /// A tree heading (a machine or a space): drawn, never selected.
+    pub header: bool,
+    /// The tree lines drawn before the row, e.g. `│  ├─ `.
+    pub branch: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -450,6 +454,33 @@ pub fn render_row(
     render_row_styled(theme, item, row, width, selected, &style, age)
 }
 
+/// A tree heading: the machine, or the space its tabs hang from. A glyph
+/// follows the name when something below it is waiting, working or done.
+fn render_header(theme: &Theme, item: &Item, row: &Row, width: isize, selected: bool) -> String {
+    let background = if selected { theme.selection_bg.as_str() } else { "" };
+    let mut segments = vec![if selected { Segment::new("accent", format!("{} ", SELECTED_BAR)) } else { Segment::new("", "  ") }];
+    if !row.branch.is_empty() {
+        segments.push(Segment::new("muted", row.branch.clone()));
+    }
+    if item.kind == KIND_MACHINE {
+        segments.push(Segment::new("accent", "▾ "));
+        segments.push(Segment::bold("accent", item.title.clone(), true));
+    } else {
+        segments.push(Segment::new("unknown", "#  "));
+        segments.push(Segment::bold("text", item.title.clone(), true));
+    }
+    if matches!(item.status.as_str(), "blocked" | "done" | "working") {
+        segments.push(Segment::new(status_role(&item.status), format!("  {}", crate::theme::status_glyph(&item.status))));
+    }
+    let body = segments_to_text(theme, &segments, background);
+    let trailing = " ".repeat((width - plain_width(&segments)).max(0) as usize);
+    if background.is_empty() {
+        format!("{}{}", body, trailing)
+    } else {
+        format!("{}{}{}{}", background, body, trailing, RESET)
+    }
+}
+
 /// One row: `marker kind status title — detail      who  place`, with the
 /// same columns on every row of the frame.
 pub fn render_row_styled(
@@ -461,6 +492,9 @@ pub fn render_row_styled(
     style: &RowStyle,
     age: Option<f64>,
 ) -> String {
+    if row.header {
+        return render_header(theme, item, row, width, selected);
+    }
     let background = if selected { theme.selection_bg.as_str() } else { "" };
     let marker = if selected {
         Segment::new("accent", format!("{} ", SELECTED_BAR))
@@ -474,7 +508,11 @@ pub fn render_row_styled(
         Some(glyph) => Segment::new(status_role(&item.status), format!("{} ", glyph)),
         None => Segment::new("", "  "),
     };
-    let leading = vec![marker, kind_cell(theme, item), status];
+    let mut leading = vec![marker];
+    if !row.branch.is_empty() {
+        leading.push(Segment::new("muted", row.branch.clone()));
+    }
+    leading.extend([kind_cell(theme, item), status]);
 
     // The right side: [age] [who] [place], places in one column per frame.
     let mut who = who_segments(theme, item, row);
@@ -942,7 +980,7 @@ mod tests {
     }
 
     fn row(positions: &[usize]) -> Row {
-        Row { item: 0, positions: positions.to_vec(), field_positions: BTreeMap::new() }
+        Row { item: 0, positions: positions.to_vec(), ..Row::default() }
     }
 
     fn draw(theme: &Theme, item: &Item, row: &Row, width: isize, selected: bool, age: Option<f64>) -> String {
@@ -954,7 +992,7 @@ mod tests {
         let terms: Vec<Term> = split_query(query).iter().map(|t| Term::new(t)).collect();
         let mut memo = Memo::default();
         let (_, found) = score_item(&terms, item, &mut memo).expect("query matches");
-        Row { item: 0, positions: found.get(&0).cloned().unwrap_or_default(), field_positions: found }
+        Row { item: 0, positions: found.get(&0).cloned().unwrap_or_default(), field_positions: found, ..Row::default() }
     }
 
     fn has_age(text: &str) -> bool {

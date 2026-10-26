@@ -60,7 +60,8 @@ Cmd+K? [Here's how](docs/reference.md#making-it-a-real-cmdk).
 | Type | To |
 | --- | --- |
 | a few letters | search everything |
-| `s ` `a ` `t ` `p ` before a search | only spaces / agents / tabs / named panes (`s:pilf` works too) |
+| `s ` `t ` `p ` before a search | only spaces / tabs / named panes (`s:pilf` works too) |
+| `w ` `i ` `a ` before a search | only agents that are working / idle / need attention (the tree stays, pruned) |
 | `>` or `c ` | commands only |
 | `enter` | jump there, or run the command |
 | `esc` | close, change nothing |
