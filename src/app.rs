@@ -568,12 +568,17 @@ impl Bar {
     }
 
     fn reselect(&mut self, keep_key: Option<String>) {
-        if let Some(keep) = keep_key.filter(|k| !k.is_empty()) {
-            match self.rows.iter().position(|row| self.pool[row.item].key == keep) {
-                Some(index) => self.selected = index,
-                None => self.selected = 0,
-            }
-        } else if self.tree_shown() {
+        let kept = keep_key
+            .filter(|k| !k.is_empty())
+            .and_then(|keep| self.rows.iter().position(|row| self.pool[row.item].key == keep).or(Some(usize::MAX)));
+        if let Some(index) = kept.filter(|&index| index != usize::MAX) {
+            self.selected = index;
+        } else if kept.is_some() {
+            self.selected = 0;
+        }
+        // A row that is gone (the bar opens with the machines' rows before the
+        // local ones arrive) falls back to where you are, like a fresh open.
+        if kept.is_none_or(|index| index == usize::MAX) && self.tree_shown() {
             // The tree opens on the tab or agent you are in.
             if let Some(current) = self.current_key.clone() {
                 if let Some(index) = self.rows.iter().position(|row| !row.header && self.pool[row.item].key == current) {
@@ -2816,6 +2821,15 @@ mod tests {
                 assert!(row.branch.ends_with("─ "));
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kept_row_that_is_gone_falls_back_to_the_current_one() {
+        let mut t = tree_bar();
+        let current = t.bar.current_key.clone();
+        t.bar.rebuild(Some("kresna/w9:p9".to_string()));
+        assert_eq!(Some(&t.bar.selected_item().key), current.as_ref());
     }
 
     #[cfg(unix)]
