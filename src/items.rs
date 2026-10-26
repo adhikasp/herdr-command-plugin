@@ -164,8 +164,8 @@ impl Item {
     }
 }
 
-/// A tree heading row. `status` is the most urgent status among its rows.
-pub fn header(kind: &'static str, key: String, title: String, machine: Option<&str>, workspace_id: &str, status: &str) -> Item {
+/// A tree heading row.
+pub fn header(kind: &'static str, key: String, title: String, machine: Option<&str>, workspace_id: &str) -> Item {
     let mut item = Item::new(ItemInit {
         kind,
         key,
@@ -178,7 +178,7 @@ pub fn header(kind: &'static str, key: String, title: String, machine: Option<&s
         pane_id: None,
         agent: None,
         agent_name: None,
-        status: status.to_string(),
+        status: "none".to_string(),
         tab_number: None,
         focused: false,
         extra_terms: Vec::new(),

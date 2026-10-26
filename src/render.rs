@@ -454,8 +454,8 @@ pub fn render_row(
     render_row_styled(theme, item, row, width, selected, &style, age)
 }
 
-/// A tree heading: the machine, or the space its tabs hang from. A glyph
-/// follows the name when something below it is waiting, working or done.
+/// A tree heading: the machine, or the space its tabs hang from. Status
+/// belongs to the agent rows alone, so a heading shows none.
 fn render_header(theme: &Theme, item: &Item, row: &Row, width: isize, selected: bool) -> String {
     let background = if selected { theme.selection_bg.as_str() } else { "" };
     let mut segments = vec![if selected { Segment::new("accent", format!("{} ", SELECTED_BAR)) } else { Segment::new("", "  ") }];
@@ -468,9 +468,6 @@ fn render_header(theme: &Theme, item: &Item, row: &Row, width: isize, selected: 
     } else {
         segments.push(Segment::new("unknown", "#  "));
         segments.push(Segment::bold("text", item.title.clone(), true));
-    }
-    if matches!(item.status.as_str(), "blocked" | "done" | "working") {
-        segments.push(Segment::new(status_role(&item.status), format!("  {}", crate::theme::status_glyph(&item.status))));
     }
     let body = segments_to_text(theme, &segments, background);
     let trailing = " ".repeat((width - plain_width(&segments)).max(0) as usize);

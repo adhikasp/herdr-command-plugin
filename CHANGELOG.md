@@ -5,8 +5,7 @@
 - The list at rest is a tree: machine (only once you have saved SSH machines)
   > space > tabs and agents. The cursor opens on the tab or agent you are in;
   space headings are rows too (Enter opens a new tab there), machine headings
-  are labels the cursor skips. A glyph on a heading shows what is waiting,
-  done or working below it. `"tree": false` brings back the flat list.
+  are labels the cursor skips; status shows on agent rows only. `"tree": false` brings back the flat list.
 - Quick state filters for agents: `w ` working, `i ` idle, `a ` attention
   (waiting on you or done). Typed as a prefix, or reached with Tab (which now
   steps through working and idle too). They keep the tree, pruned to the

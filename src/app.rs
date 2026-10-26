@@ -430,38 +430,31 @@ impl Bar {
         let with_machines = machines.len() > 1;
         let mut headers: Vec<Item> = Vec::new();
         for machine in machines {
-            let mut spaces: Vec<(String, String, &str)> = Vec::new();
+            let mut spaces: Vec<(String, String)> = Vec::new();
             for item in self.pool[..self.command_start].iter().filter(|i| i.machine == machine) {
                 if !matches!(item.kind, KIND_AGENT | KIND_TAB | KIND_PANE) {
                     continue;
                 }
-                let at = match spaces.iter().position(|(id, _, _)| *id == item.workspace_id) {
-                    Some(at) => at,
-                    None => {
-                        let label = match &machine {
-                            Some(name) => item.workspace_label.strip_prefix(&format!("{}/", name)).unwrap_or(&item.workspace_label),
-                            None => &item.workspace_label,
-                        };
-                        let label = if label.is_empty() { item.workspace_id.clone() } else { label.to_string() };
-                        spaces.push((item.workspace_id.clone(), label, "none"));
-                        spaces.len() - 1
-                    }
-                };
-                if item.kind == KIND_AGENT && item.status_rank() < crate::items::status_order(spaces[at].2) {
-                    spaces[at].2 = item.status.as_str();
+                if spaces.iter().any(|(id, _)| *id == item.workspace_id) {
+                    continue;
                 }
+                let label = match &machine {
+                    Some(name) => item.workspace_label.strip_prefix(&format!("{}/", name)).unwrap_or(&item.workspace_label),
+                    None => &item.workspace_label,
+                };
+                let label = if label.is_empty() { item.workspace_id.clone() } else { label.to_string() };
+                spaces.push((item.workspace_id.clone(), label));
             }
             if spaces.is_empty() {
                 continue;
             }
             let name = machine.clone().unwrap_or_else(local_name);
             if with_machines {
-                let worst = spaces.iter().map(|(_, _, s)| *s).min_by_key(|s| crate::items::status_order(s)).unwrap_or("none");
-                headers.push(crate::items::header(KIND_MACHINE, format!("machine:{}", name), name.clone(), None, "", worst));
+                headers.push(crate::items::header(KIND_MACHINE, format!("machine:{}", name), name.clone(), None, ""));
             }
-            for (id, label, status) in spaces {
+            for (id, label) in spaces {
                 let key = format!("group:{}/{}", name, id);
-                headers.push(crate::items::header(KIND_SPACE, key, label, machine.as_deref(), &id, status));
+                headers.push(crate::items::header(KIND_SPACE, key, label, machine.as_deref(), &id));
             }
         }
         self.pool.extend(headers);
@@ -486,6 +479,11 @@ impl Bar {
         let pool = pool?;
         self.snapshot_answer = answer;
         self.install(pool, false);
+        // The machines' rows can already be on screen (see `watch_machines`),
+        // and install kept the cursor on one of them: a fresh open starts over.
+        self.selected = 0;
+        self.offset = 0;
+        self.reselect(None);
         if self.config.select_current {
             // Open on the row you are in instead of the one you came from.
             // The order stays alt-tab's: that row follows the recent ones.
@@ -2853,7 +2851,7 @@ mod tests {
     #[test]
     fn a_machine_heading_is_only_a_label() {
         let mut t = tree_bar();
-        t.bar.pool.push(crate::items::header(KIND_MACHINE, "machine:x".into(), "x".into(), None, "", "none"));
+        t.bar.pool.push(crate::items::header(KIND_MACHINE, "machine:x".into(), "x".into(), None, ""));
         t.bar.rows.insert(0, Row { item: t.bar.pool.len() - 1, header: true, ..Row::default() });
         t.bar.selected = 0;
         t.bar.move_by(1, true);
