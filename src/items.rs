@@ -243,7 +243,16 @@ fn first_str(values: &[&str]) -> String {
 fn tab_label(tab: &Value, has_agents: bool) -> String {
     let label = clean(tab.get("label"));
     if has_agents {
-        clean_str(&tab_status::strip(&label))
+        // A label decorated twice by an older build keeps its inner logo and glyph.
+        let mut bare = tab_status::strip(&label);
+        loop {
+            let again = tab_status::strip(&bare);
+            if again == bare {
+                break;
+            }
+            bare = again;
+        }
+        clean_str(&crate::auto_title::strip_vendor_prefix(&bare))
     } else {
         label
     }
@@ -493,6 +502,7 @@ pub fn build_items(snapshot: &Value) -> Vec<Item> {
                     agent.get("terminal_title_stripped"),
                     pane.get("terminal_title_stripped"),
                 ]);
+                let summary = crate::auto_title::strip_vendor_prefix(&summary);
                 let title = first_str(&[&label, &summary, pyos::basename(&cwd), "agent"]);
                 let detail =
                     if summary_repeats_title(&summary, &title, &cwd, &workspace_label) { String::new() } else { summary };

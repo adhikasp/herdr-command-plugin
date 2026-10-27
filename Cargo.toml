@@ -1,6 +1,6 @@
 [package]
 name = "herdr-command-plugin"
-version = "0.16.0"
+version = "0.16.1"
 edition = "2021"
 rust-version = "1.88"
 description = "Cmd+K for Herdr: fuzzy-find any space, tab, pane, agent or command, with agent icons and automatic tab titles"

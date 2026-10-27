@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.1
+
+- OpenCode's `OC | ` terminal-title prefix is dropped from agent titles (the logo already says it), and tab labels decorated twice by an older build are cleaned up.
+
 ## 0.16.0
 
 - The list at rest is a tree: machine (only once you have saved SSH machines)

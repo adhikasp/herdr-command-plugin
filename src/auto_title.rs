@@ -427,8 +427,16 @@ fn first_truthy<'a>(values: &[&'a Value]) -> &'a Value {
     values.iter().find(|v| v.truthy()).copied().unwrap_or(&NULL)
 }
 
+/// OpenCode prefixes its terminal title with "OC | "; the vendor logo already says it.
+pub(crate) fn strip_vendor_prefix(title: &str) -> String {
+    title.strip_prefix("OC | ").unwrap_or(title).to_string()
+}
+
 pub(crate) fn agent_title(agent: &Value, pane: &Value) -> String {
-    let mut title = title_of(first_truthy(&[agent.get("terminal_title_stripped"), pane.get("terminal_title_stripped")]));
+    let mut title = strip_vendor_prefix(&title_of(first_truthy(&[
+        agent.get("terminal_title_stripped"),
+        pane.get("terminal_title_stripped"),
+    ])));
     let cwd = str_or_empty(first_truthy(&[agent.get("cwd"), pane.get("cwd")]));
     let folder = pyos::path_name(cwd);
     let suffix = format!(" | {}", folder);
