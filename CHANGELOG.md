@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0
 
 - The list at rest is a tree: machine (only once you have saved SSH machines)
   > space > tabs and agents. The cursor opens on the tab or agent you are in;
