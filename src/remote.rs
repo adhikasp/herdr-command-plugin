@@ -3,16 +3,29 @@
 //! Herdr only answers for its own server, so each enabled machine is asked
 //! through `herdr --machine <label> api snapshot`, which takes a couple of
 //! seconds. A background thread keeps the latest rows; the bar picks them up
-//! on its next refresh instead of waiting for them to open.
+//! on its next refresh instead of waiting for them to open. The daemon asks a
+//! machine when its event stream (see `machine_events`) says something changed,
+//! and polls only the machines that have no stream.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::client::HerdrClient;
 use crate::items::{build_items, Item};
+use crate::machine_events::{Signal, Watcher};
 use crate::opener::herdr_bin;
 use crate::pyjson::{self, Value};
 
+/// How often a machine with no event stream is asked.
 const POLL_SECONDS: f64 = 4.0;
+/// How often a machine with a live event stream is asked anyway, in case an
+/// event was lost.
+const HEARTBEAT_SECONDS: f64 = 60.0;
+/// How long to let a burst of events settle before asking.
+const DEBOUNCE_SECONDS: f64 = 0.25;
+/// How often the saved machines are listed again.
+const LIST_SECONDS: f64 = 10.0;
 const MACHINE_TIMEOUT: f64 = 20.0;
 
 #[derive(Default)]
@@ -164,19 +177,44 @@ pub fn run_daemon() -> i32 {
     }
     let socket = std::env::var_os("HERDR_SOCKET_PATH").map(std::path::PathBuf::from).filter(|p| p.is_absolute());
     let mut snapshots = load_cache();
+    let (signals, inbox) = std::sync::mpsc::channel();
+    let mut states: HashMap<String, State> = HashMap::new();
     loop {
         if cfg!(unix) && socket.as_ref().is_some_and(|socket| !socket.exists()) {
             return 0;
         }
-        let fresh = fetch_all();
+        let machines = enabled_machines();
+        // One event stream per machine; a machine no longer enabled drops its.
+        states.retain(|label, state| machines.iter().any(|m| m.label == *label && m.key() == state.key));
+        for machine in &machines {
+            states.entry(machine.label.clone()).or_insert_with(|| State {
+                key: machine.key(),
+                watcher: Watcher::spawn(&machine.label, &machine.target, &machine.session, signals.clone()),
+                live: false,
+                dirty_since: None,
+                fetched: None,
+            });
+        }
+        let now = Instant::now();
+        let due: Vec<&Machine> = machines.iter().filter(|m| states.get(&m.label).is_some_and(|s| s.due(now))).collect();
+        let fresh = fetch(&due);
+        for (label, snapshot) in &fresh {
+            if let Some(state) = states.get_mut(label) {
+                state.fetched = Some(now);
+                state.dirty_since = None;
+                if let Some(snapshot) = snapshot {
+                    state.watcher.follow_panes(agent_panes(snapshot));
+                }
+            }
+        }
         // A machine that didn't answer keeps its last rows rather than
         // vanishing for a moment; one no longer enabled drops out.
-        if !fresh.is_empty() {
+        if !machines.is_empty() {
             let mut next: Snapshots = Vec::new();
-            for (machine, snapshot) in fresh {
-                match snapshot {
-                    Some(snapshot) => next.push((machine, snapshot)),
-                    None => next.extend(snapshots.iter().find(|(m, _)| *m == machine).cloned()),
+            for machine in &machines {
+                match fresh.iter().find(|(label, _)| *label == machine.label) {
+                    Some((_, Some(snapshot))) => next.push((machine.label.clone(), snapshot.clone())),
+                    _ => next.extend(snapshots.iter().find(|(m, _)| *m == machine.label).cloned()),
                 }
             }
             if next != snapshots {
@@ -184,18 +222,99 @@ pub fn run_daemon() -> i32 {
             }
             snapshots = next;
         }
-        crate::client::sleep(POLL_SECONDS);
+        // Sleep until the next machine is due or a stream speaks up.
+        let now = Instant::now();
+        let wait = states.values().map(|s| s.wait(now)).fold(LIST_SECONDS, f64::min).max(0.05);
+        if let Ok(first) = inbox.recv_timeout(Duration::from_secs_f64(wait)) {
+            apply(&mut states, first);
+            // Events arrive in bursts; let the burst finish, then fetch once.
+            crate::client::sleep(DEBOUNCE_SECONDS);
+            while let Ok(next) = inbox.try_recv() {
+                apply(&mut states, next);
+            }
+        }
     }
 }
 
-fn enabled_machines() -> Vec<String> {
+struct Machine {
+    label: String,
+    target: String,
+    session: String,
+}
+
+impl Machine {
+    fn key(&self) -> String {
+        format!("{}\t{}", self.target, self.session)
+    }
+}
+
+struct State {
+    key: String,
+    watcher: Watcher,
+    live: bool,
+    dirty_since: Option<Instant>,
+    fetched: Option<Instant>,
+}
+
+impl State {
+    /// Seconds until this machine should be asked again.
+    fn wait(&self, now: Instant) -> f64 {
+        let Some(fetched) = self.fetched else { return 0.0 };
+        if self.dirty_since.is_some() {
+            return 0.0;
+        }
+        let every = if self.live { HEARTBEAT_SECONDS } else { POLL_SECONDS };
+        (every - now.saturating_duration_since(fetched).as_secs_f64()).max(0.0)
+    }
+
+    fn due(&self, now: Instant) -> bool {
+        self.wait(now) <= 0.0
+    }
+}
+
+fn apply(states: &mut HashMap<String, State>, signal: Signal) {
+    match signal {
+        Signal::Event(label) => {
+            if let Some(state) = states.get_mut(&label) {
+                state.dirty_since.get_or_insert_with(Instant::now);
+            }
+        }
+        Signal::Live(label, live) => {
+            if let Some(state) = states.get_mut(&label) {
+                // Whatever happened while the stream was down is unknown. A
+                // stream that never came up has nothing to catch up on.
+                if live || state.live {
+                    state.dirty_since.get_or_insert_with(Instant::now);
+                }
+                state.live = live;
+            }
+        }
+    }
+}
+
+/// Panes running an agent: the ones whose status changes are worth a wake-up.
+fn agent_panes(snapshot: &Value) -> Vec<String> {
+    snapshot
+        .get("agents")
+        .list_or_empty()
+        .iter()
+        .filter_map(|agent| agent.get("pane_id").as_str().map(str::to_string))
+        .collect()
+}
+
+fn enabled_machines() -> Vec<Machine> {
     let argv = vec![herdr_bin(), "machine".to_string(), "list".to_string(), "--json".to_string()];
     let Some(output) = crate::proc::run_capture(&argv, MACHINE_TIMEOUT) else { return Vec::new() };
     let Ok(Value::List(machines)) = pyjson::loads(&String::from_utf8_lossy(&output.stdout)) else { return Vec::new() };
     machines
         .iter()
         .filter(|m| m.get("enabled").is_true())
-        .filter_map(|m| m.get("label").as_str().map(str::to_string))
+        .filter_map(|m| {
+            let label = m.get("label").as_str()?.to_string();
+            let target = m.get("target").as_str().unwrap_or(&label).to_string();
+            let session = m.get("session").as_str().unwrap_or("default").to_string();
+            Some(Machine { label, target, session })
+        })
         .collect()
 }
 
@@ -205,10 +324,10 @@ fn fetch_machine(label: &str) -> Option<Value> {
     client.cli(&args).and_then(HerdrClient::unwrap).and_then(HerdrClient::snapshot_of).ok()
 }
 
-fn fetch_all() -> Vec<(String, Option<Value>)> {
-    let machines = enabled_machines();
+fn fetch(machines: &[&Machine]) -> Vec<(String, Option<Value>)> {
     let handles: Vec<_> = machines
-        .into_iter()
+        .iter()
+        .map(|m| m.label.clone())
         .map(|label| std::thread::spawn(move || (label.clone(), fetch_machine(&label))))
         .collect();
     handles.into_iter().filter_map(|h| h.join().ok()).collect()

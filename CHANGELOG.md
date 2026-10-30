@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.0
+
+- Saved SSH machines are no longer polled every 4 seconds. The machines process
+  keeps one `remote-api-bridge` stream per machine open and asks for a snapshot
+  only when an event arrives (a heartbeat every 60 seconds covers a lost one),
+  so a machine on the other side of the internet no longer sees dozens of SSH
+  logins a minute. A machine whose stream cannot be opened is still polled
+  every 4 seconds, as before.
+
 ## 0.16.1
 
 - OpenCode's `OC | ` terminal-title prefix is dropped from agent titles (the logo already says it), and tab labels decorated twice by an older build are cleaned up.
