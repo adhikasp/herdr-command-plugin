@@ -17,8 +17,16 @@ use crate::machine_events::{Signal, Watcher};
 use crate::opener::herdr_bin;
 use crate::pyjson::{self, Value};
 
-/// How often a machine with no event stream is asked.
+/// How often a machine with no event stream is asked while it is changing.
 const POLL_SECONDS: f64 = 4.0;
+/// The slowest a machine with no event stream is asked while it has agent
+/// sessions that are just sitting there. Each ask costs a few SSH logins, and
+/// on a Windows host every login starts a PowerShell for Defender to scan, so
+/// an unchanging machine backs off towards this.
+const MAX_POLL_SECONDS: f64 = 30.0;
+/// The slowest a machine with no agents at all is asked. Nothing there can
+/// need attention, so the only thing a poll finds is that someone started one.
+const DORMANT_POLL_SECONDS: f64 = 120.0;
 /// How often a machine with a live event stream is asked anyway, in case an
 /// event was lost.
 const HEARTBEAT_SECONDS: f64 = 60.0;
@@ -191,6 +199,8 @@ pub fn run_daemon() -> i32 {
                 key: machine.key(),
                 watcher: Watcher::spawn(&machine.label, &machine.target, &machine.session, signals.clone()),
                 live: false,
+                quiet: 0,
+                activity: Activity::Active,
                 dirty_since: None,
                 fetched: None,
             });
@@ -202,6 +212,14 @@ pub fn run_daemon() -> i32 {
             if let Some(state) = states.get_mut(label) {
                 state.fetched = Some(now);
                 state.dirty_since = None;
+                // Same rows as last time, or no answer: ask less often.
+                let before = snapshots.iter().find(|(m, _)| m == label).map(|(_, v)| v);
+                state.quiet = match (snapshot, before) {
+                    (Some(now_rows), Some(old_rows)) if now_rows == old_rows => state.quiet.saturating_add(1),
+                    (None, _) => state.quiet.saturating_add(1),
+                    _ => 0,
+                };
+                state.activity = snapshot.as_ref().map_or(Activity::Dormant, activity_of);
                 if let Some(snapshot) = snapshot {
                     state.watcher.follow_panes(agent_panes(snapshot));
                 }
@@ -248,10 +266,48 @@ impl Machine {
     }
 }
 
+/// What a machine's last snapshot says about how soon it could need a look.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Activity {
+    /// An agent is working or blocked: statuses change under you, so ask often.
+    Active,
+    /// Agents exist but all are idle or done.
+    Idle,
+    /// No agents, or the machine did not answer.
+    Dormant,
+}
+
+fn activity_of(snapshot: &Value) -> Activity {
+    let agents = snapshot.get("agents").list_or_empty();
+    if agents.iter().any(|a| matches!(a.get("agent_status").as_str(), Some("working") | Some("blocked"))) {
+        Activity::Active
+    } else if agents.is_empty() {
+        Activity::Dormant
+    } else {
+        Activity::Idle
+    }
+}
+
+/// The poll interval for a machine with no event stream, after `quiet` asks in
+/// a row that found nothing new: an active machine is always `POLL_SECONDS`;
+/// the rest double from there up to a ceiling that depends on the activity.
+fn poll_interval(activity: Activity, quiet: u32) -> f64 {
+    let ceiling = match activity {
+        Activity::Active => return POLL_SECONDS,
+        Activity::Idle => MAX_POLL_SECONDS,
+        Activity::Dormant => DORMANT_POLL_SECONDS,
+    };
+    (POLL_SECONDS * 2f64.powi(quiet.min(16) as i32)).min(ceiling)
+}
+
 struct State {
     key: String,
     watcher: Watcher,
     live: bool,
+    /// Asks in a row that came back unchanged, or not at all.
+    quiet: u32,
+    /// From the last answer. Unknown counts as dormant.
+    activity: Activity,
     dirty_since: Option<Instant>,
     fetched: Option<Instant>,
 }
@@ -263,7 +319,7 @@ impl State {
         if self.dirty_since.is_some() {
             return 0.0;
         }
-        let every = if self.live { HEARTBEAT_SECONDS } else { POLL_SECONDS };
+        let every = if self.live { HEARTBEAT_SECONDS } else { poll_interval(self.activity, self.quiet) };
         (every - now.saturating_duration_since(fetched).as_secs_f64()).max(0.0)
     }
 
@@ -454,4 +510,43 @@ pub fn prefix_key() -> String {
         }
     }
     "ctrl+b".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snap(json: &str) -> Value {
+        pyjson::loads(json).unwrap()
+    }
+
+    #[test]
+    fn activity_follows_agent_status() {
+        assert_eq!(activity_of(&snap(r#"{"agents": []}"#)), Activity::Dormant);
+        assert_eq!(activity_of(&snap(r#"{}"#)), Activity::Dormant);
+        let idle = r#"{"agents": [{"agent_status": "idle"}, {"agent_status": "done"}, {"agent_status": "unknown"}]}"#;
+        assert_eq!(activity_of(&snap(idle)), Activity::Idle);
+        let working = r#"{"agents": [{"agent_status": "idle"}, {"agent_status": "working"}]}"#;
+        assert_eq!(activity_of(&snap(working)), Activity::Active);
+        let blocked = r#"{"agents": [{"agent_status": "blocked"}]}"#;
+        assert_eq!(activity_of(&snap(blocked)), Activity::Active);
+    }
+
+    #[test]
+    fn poll_interval_depends_on_activity_and_backs_off() {
+        // Active never slows down, however many asks found nothing new.
+        assert_eq!(poll_interval(Activity::Active, 0), POLL_SECONDS);
+        assert_eq!(poll_interval(Activity::Active, 50), POLL_SECONDS);
+        // Idle doubles to 30s.
+        assert_eq!(poll_interval(Activity::Idle, 0), POLL_SECONDS);
+        assert_eq!(poll_interval(Activity::Idle, 1), 8.0);
+        assert_eq!(poll_interval(Activity::Idle, 2), 16.0);
+        assert_eq!(poll_interval(Activity::Idle, 3), MAX_POLL_SECONDS);
+        assert_eq!(poll_interval(Activity::Idle, u32::MAX), MAX_POLL_SECONDS);
+        // Dormant keeps doubling to 120s.
+        assert_eq!(poll_interval(Activity::Dormant, 3), 32.0);
+        assert_eq!(poll_interval(Activity::Dormant, 4), 64.0);
+        assert_eq!(poll_interval(Activity::Dormant, 5), DORMANT_POLL_SECONDS);
+        assert_eq!(poll_interval(Activity::Dormant, u32::MAX), DORMANT_POLL_SECONDS);
+    }
 }
