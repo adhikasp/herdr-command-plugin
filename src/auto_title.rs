@@ -445,7 +445,7 @@ pub(crate) fn agent_title(agent: &Value, pane: &Value) -> String {
         title = pystr::strip(&title.chars().take(keep).collect::<String>()).to_string();
     }
     let folded = pystr::casefold(&title);
-    let generic = ["", "codex", "claude", "claude code"];
+    let generic = ["", "codex", "claude", "claude code", "opencode"];
     if generic.contains(&folded.as_str())
         || folded == pystr::casefold(&folder)
         || folded == pystr::casefold(cwd)
@@ -596,15 +596,22 @@ pub fn candidates(snapshot: &Value, owned: &Map, follow_new_sessions: bool) -> V
         }
         let session = first_truthy(&[agent.get("agent_session"), pane.get("agent_session")]);
         let kind = agent.get("agent");
-        let Some(kind_text) = kind.as_str().filter(|k| *k == "claude" || *k == "codex") else { continue };
+        let Some(kind_text) = kind.as_str().filter(|k| matches!(*k, "claude" | "codex" | "opencode")) else { continue };
         let suggested = agent_title(agent, pane);
         let mut session_id: Option<String> = None;
+        // OpenCode ids (`ses_...`) are not UUIDs and have no transcript to read,
+        // but they still tell one session in a pane from the next.
+        let mut bound_session: Option<String> = None;
         if session.truthy() {
             if !matches!(session, Value::Dict(_)) || !py_eq(session.get("agent"), kind) || session.get("kind").as_str() != Some("id") {
                 continue;
             }
             match session.get("value").as_str() {
-                Some(value) if is_session_id(value) => session_id = Some(value.to_string()),
+                Some(value) if is_session_id(value) => {
+                    session_id = Some(value.to_string());
+                    bound_session = session_id.clone();
+                }
+                Some(value) if kind_text == "opencode" && !value.is_empty() => bound_session = Some(value.to_string()),
                 _ => continue,
             }
         } else if suggested.is_empty() || pane.get("terminal_id").as_str().is_none_or(|t| t.is_empty()) {
@@ -613,7 +620,7 @@ pub fn candidates(snapshot: &Value, owned: &Map, follow_new_sessions: bool) -> V
             // a replacement pane from claiming a name we previously wrote.
             continue;
         }
-        let session_value = session_id.clone().map(Value::str).unwrap_or(Value::Null);
+        let session_value = bound_session.clone().map(Value::str).unwrap_or(Value::Null);
         let identity = Value::List(vec![kind.clone(), session_value, agent.get("pane_id").clone(), pane.get("terminal_id").clone()]);
         let Some(tab_id) = tab.get("tab_id").as_str() else { continue };
         let previous = match owned.get(tab_id) {
@@ -629,7 +636,7 @@ pub fn candidates(snapshot: &Value, owned: &Map, follow_new_sessions: bool) -> V
             let old_identity = previous.get("identity");
             // Hooks may report the session ID after the first terminal title.
             let earlier = Value::List(vec![kind.clone(), Value::Null, agent.get("pane_id").clone(), pane.get("terminal_id").clone()]);
-            let identified_later = session_id.is_some() && py_eq(old_identity, &earlier);
+            let identified_later = bound_session.is_some() && py_eq(old_identity, &earlier);
             // `/clear`, a restarted agent and a respawned terminal all keep the pane.
             let pane_id = agent.get("pane_id");
             let same_pane = follow_new_sessions
@@ -1622,6 +1629,22 @@ mod tests {
         t.agent("terminal_title_stripped", Value::str("Different task"));
         t.apply();
         assert_eq!(t.calls(), vec!["First task", "Different task"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_sessions_are_titled_and_followed() {
+        let mut t = Titles::new();
+        t.titles.configure(&config(r#"{"follow_new_sessions": true}"#));
+        let opencode = |id: &str| json(&format!(r#"{{"agent": "opencode", "kind": "id", "value": "{}"}}"#, id));
+        t.agent("agent", Value::str("opencode"));
+        t.agent("agent_session", opencode("ses_first"));
+        t.agent("terminal_title_stripped", Value::str("OC | First task"));
+        t.apply();
+        t.agent("agent_session", opencode("ses_second"));
+        t.agent("terminal_title_stripped", Value::str("OC | Second task"));
+        t.apply();
+        assert_eq!(t.calls(), vec!["First task", "Second task"]);
     }
 
     #[cfg(unix)]
