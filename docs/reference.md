@@ -268,6 +268,9 @@ Optional. Write `config.json` in the plugin config directory
 | `auto_titles` | `true` | Claude and Codex task titles for unnamed tabs, suppressed by competing naming plugins; `false` opts out |
 | `lowercase_titles` | `false` | lowercase generated task titles; changes apply without a restart and custom names keep their case |
 | `follow_new_sessions` | `false` | `true` lets the next Claude or Codex session in a pane take over the task title written for the one before it, after `/clear`, a restart or a new terminal; a tab you renamed stays yours |
+| `multi_agent_titles` | `false` | `true` names a tab with two or more agents from one OpenRouter request over their session titles (they leave your machine); only default or plugin-written names are replaced, and the request repeats only when the titles change |
+| `llm_model` | `"openai/gpt-6-luna"` | OpenRouter model for `multi_agent_titles` |
+| `llm_env_file` | `""` | file with an `OPENROUTER_API_KEY=` line (`~/` allowed), used when the environment variable is unset |
 | `tab_status` | `false` | opt in to agent logos and status glyphs in tab names; `false` restores labels still owned by the watcher |
 | `running_time` | `false` | `true` adds each row's running time (`47s`, `2h04m`), read once per pane with `process_info`/`ps`; off, the bar skips that reading and opens faster |
 | `scope` | `"all"` | the filter the bar opens with: `"agent"` (`@ agents`), `"pane"` (`% panes`), `"tab"` (`$ shells`), `"working"`, `"idle"`, `"blocked"` (`! attention`) or `"all"`; `backspace` on an empty query still clears it, and `ctrl+u` returns to it |

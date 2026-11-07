@@ -34,6 +34,13 @@ pub struct Config {
     /// Let the next session in a pane take over the task title written for
     /// the one before it.
     pub follow_new_sessions: bool,
+    /// Name tabs holding two or more agents with one OpenRouter request over
+    /// their session titles. Off by default: titles leave the machine.
+    pub multi_agent_titles: bool,
+    /// OpenRouter model for those requests.
+    pub llm_model: String,
+    /// File with an `OPENROUTER_API_KEY=` line, used when the variable is unset.
+    pub llm_env_file: String,
     /// Open in a list mode where j/k move and "/" starts the search.
     pub modal: bool,
 }
@@ -106,6 +113,13 @@ impl Config {
             select_current: get("select_current").map(|v| v.is_true()).unwrap_or(false),
             tree: get("tree").map(|v| !v.is_false()).unwrap_or(true),
             follow_new_sessions: get("follow_new_sessions").map(|v| v.is_true()).unwrap_or(false),
+            multi_agent_titles: get("multi_agent_titles").map(|v| v.is_true()).unwrap_or(false),
+            llm_model: get("llm_model")
+                .and_then(|v| v.as_str())
+                .filter(|m| !pystr::strip(m).is_empty())
+                .unwrap_or("openai/gpt-6-luna")
+                .to_string(),
+            llm_env_file: get("llm_env_file").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             modal: get("modal").map(|v| v.is_true()).unwrap_or(false),
         }
     }

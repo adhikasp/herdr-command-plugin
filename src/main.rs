@@ -13,6 +13,7 @@ mod host;
 mod icons;
 mod items;
 mod keys;
+mod llm_title;
 mod machine_events;
 mod mru;
 mod opener;

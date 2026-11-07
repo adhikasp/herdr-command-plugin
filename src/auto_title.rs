@@ -664,10 +664,92 @@ pub fn candidates(snapshot: &Value, owned: &Map, follow_new_sessions: bool) -> V
     out
 }
 
+/// A tab with two or more agents, ready for one LLM-written name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MultiCandidate {
+    pub tab_id: String,
+    pub signature: String,
+    pub titles: Vec<String>,
+    pub label: Value,
+}
+
+/// Tabs the single-agent path skips: 2+ agents, a default or plugin-written
+/// name, and a set of session titles the last name was not made from.
+pub fn multi_candidates(snapshot: &Value, owned: &Map) -> Vec<MultiCandidate> {
+    let mut out = Vec::new();
+    let mut positions: Vec<(Value, i64)> = Vec::new();
+    let empty = Value::Dict(Map::new());
+    for tab in snapshot.get("tabs").list_or_empty() {
+        let workspace = tab.as_dict().and_then(|t| t.get("workspace_id")).cloned().unwrap_or_else(|| Value::str(""));
+        let position = match positions.iter_mut().find(|(k, _)| py_eq(k, &workspace)) {
+            Some(slot) => {
+                slot.1 += 1;
+                slot.1
+            }
+            None => {
+                positions.push((workspace, 1));
+                1
+            }
+        };
+        if tab.get("title_conflict").truthy() {
+            continue;
+        }
+        let tab_value = tab.get("tab_id");
+        let agents: Vec<&Value> = snapshot.get("agents").list_or_empty().iter().filter(|a| py_eq(a.get("tab_id"), tab_value)).collect();
+        if agents.len() < 2 {
+            continue;
+        }
+        let mut titles: Vec<String> = Vec::new();
+        for agent in &agents {
+            let pane = snapshot
+                .get("panes")
+                .list_or_empty()
+                .iter()
+                .rev()
+                .find(|p| py_eq(p.get("pane_id"), agent.get("pane_id")))
+                .unwrap_or(&empty);
+            let title = agent_title(agent, pane);
+            if !title.is_empty() && !titles.contains(&title) {
+                titles.push(title);
+            }
+        }
+        if titles.is_empty() {
+            continue;
+        }
+        titles.sort();
+        let signature = titles.join("\n");
+        let Some(tab_id) = tab_value.as_str() else { continue };
+        let previous = match owned.get(tab_id) {
+            Some(previous @ Value::Dict(_)) => previous,
+            _ => &empty,
+        };
+        if previous.get("yielded").truthy() {
+            continue;
+        }
+        let label = tab.get("label");
+        let unnamed = label.is_null() || label.as_str() == Some("") || label.as_str() == Some(position.to_string().as_str());
+        if !unnamed && !py_eq(previous.get("title"), label) {
+            continue;
+        }
+        if previous.get("llm_sig").as_str() == Some(signature.as_str()) {
+            continue;
+        }
+        out.push(MultiCandidate { tab_id: tab_id.to_string(), signature, titles, label: label.clone() });
+    }
+    out
+}
+
 pub struct AutoTitles {
     pub enabled: bool,
     pub lowercase_titles: bool,
     pub follow_new_sessions: bool,
+    pub multi_agent_titles: bool,
+    pub llm_model: String,
+    pub llm_env_file: String,
+    llm_tx: std::sync::mpsc::Sender<(String, String, Option<String>)>,
+    llm_rx: std::sync::mpsc::Receiver<(String, String, Option<String>)>,
+    llm_inflight: HashMap<String, String>,
+    llm_last: HashMap<String, Instant>,
     pub reader: TranscriptReader,
     pub owned: Map,
     pub state_dir: Option<PathBuf>,
@@ -681,10 +763,18 @@ impl Default for AutoTitles {
 
 impl AutoTitles {
     pub fn new() -> AutoTitles {
+        let (llm_tx, llm_rx) = std::sync::mpsc::channel();
         let mut titles = AutoTitles {
             enabled: false,
             lowercase_titles: false,
             follow_new_sessions: false,
+            multi_agent_titles: false,
+            llm_model: String::new(),
+            llm_env_file: String::new(),
+            llm_tx,
+            llm_rx,
+            llm_inflight: HashMap::new(),
+            llm_last: HashMap::new(),
             reader: TranscriptReader::default(),
             owned: Map::new(),
             state_dir: title_state_dir(),
@@ -699,6 +789,78 @@ impl AutoTitles {
         self.enabled = config.auto_titles && !["0", "false", "no", "off"].contains(&transcript.as_str());
         self.lowercase_titles = config.lowercase_titles;
         self.follow_new_sessions = config.follow_new_sessions;
+        self.multi_agent_titles = config.multi_agent_titles;
+        self.llm_model = config.llm_model.clone();
+        self.llm_env_file = config.llm_env_file.clone();
+    }
+
+    /// Name tabs holding 2+ agents: results of earlier requests are written
+    /// first, then new requests start on a worker thread so the watcher never waits.
+    fn apply_multi(&mut self, client: &mut TabStatus, snapshot: &mut Shared) -> Result<()> {
+        if !self.multi_agent_titles {
+            return Ok(());
+        }
+        while let Ok((tab_id, signature, name)) = self.llm_rx.try_recv() {
+            self.llm_inflight.remove(&tab_id);
+            let Some(name) = name else { continue };
+            let mut title = title_str(&name);
+            if self.lowercase_titles {
+                title = pystr::lower(&title);
+            }
+            if title.is_empty() {
+                continue;
+            }
+            let attempt = (|| -> Result<Option<Shared>> {
+                let fresh = client.snapshot()?;
+                let found = multi_candidates(&fresh.borrow(), &self.owned);
+                let Some(candidate) = found.into_iter().find(|c| c.tab_id == tab_id && c.signature == signature) else {
+                    return Ok(None);
+                };
+                if !py_eq(&candidate.label, &Value::str(title.clone())) {
+                    client.rename_tab(&tab_id, &title)?;
+                }
+                let mut record = Map::new();
+                record.insert("identity", Value::List(vec![Value::str("multi")]));
+                record.insert("title", Value::str(title.clone()));
+                record.insert("llm_sig", Value::str(signature.clone()));
+                self.owned.insert(tab_id.clone(), Value::Dict(record));
+                if let Some(Value::List(tabs)) = fresh.borrow_mut().as_dict_mut().and_then(|s| s.get_mut("tabs")) {
+                    for tab in tabs.iter_mut() {
+                        if tab.get("tab_id").as_str() == Some(tab_id.as_str()) {
+                            if let Value::Dict(tab) = tab {
+                                tab.insert("label", Value::str(title.clone()));
+                            }
+                        }
+                    }
+                }
+                Ok(Some(fresh))
+            })();
+            match attempt {
+                Ok(Some(fresh)) => *snapshot = fresh,
+                Ok(None) => {}
+                Err(error) if error.is_herdr() => {}
+                Err(error) => return Err(error),
+            }
+        }
+        let wanted = multi_candidates(&snapshot.borrow(), &self.owned);
+        for candidate in wanted {
+            if self.llm_inflight.contains_key(&candidate.tab_id) {
+                continue;
+            }
+            if self.llm_last.get(&candidate.tab_id).is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+                continue;
+            }
+            let Some(key) = crate::llm_title::api_key(&self.llm_env_file) else { return Ok(()) };
+            self.llm_last.insert(candidate.tab_id.clone(), Instant::now());
+            self.llm_inflight.insert(candidate.tab_id.clone(), candidate.signature.clone());
+            let (tx, model) = (self.llm_tx.clone(), self.llm_model.clone());
+            let scratch = self.state_dir.clone().unwrap_or_else(std::env::temp_dir);
+            std::thread::spawn(move || {
+                let name = crate::llm_title::name_tab(&key, &model, &candidate.titles, &scratch);
+                let _ = tx.send((candidate.tab_id, candidate.signature, name));
+            });
+        }
+        Ok(())
     }
 
     /// Name tabs after their agents' tasks; errors only for local failures.
@@ -823,6 +985,7 @@ impl AutoTitles {
                 }
             }
         }
+        self.apply_multi(client, &mut snapshot)?;
         Ok(snapshot)
     }
 }
@@ -1941,5 +2104,37 @@ mod tests {
         std::fs::remove_dir(&staging).unwrap();
         t.apply();
         assert_eq!(t.calls().last().unwrap(), "Task title");
+    }
+
+    fn two_agent_snapshot(label: &str) -> Value {
+        json(&format!(
+            r#"{{"tabs": [{{"tab_id": "w1:t9", "workspace_id": "w1", "number": 9, "label": "{}"}}],
+                "panes": [{{"pane_id": "w1:p9", "terminal_id": "t9"}}, {{"pane_id": "w1:p10", "terminal_id": "t10"}}],
+                "agents": [{{"pane_id": "w1:p9", "tab_id": "w1:t9", "agent": "claude", "cwd": "/work/app",
+                             "terminal_title_stripped": "Fix login"}},
+                           {{"pane_id": "w1:p10", "tab_id": "w1:t9", "agent": "claude", "cwd": "/work/app",
+                             "terminal_title_stripped": "Add tests"}}]}}"#,
+            label
+        ))
+    }
+
+    #[test]
+    fn multi_agent_tabs_are_named_only_when_default_or_ours() {
+        let found = multi_candidates(&two_agent_snapshot("1"), &Map::new());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].titles, vec!["Add tests", "Fix login"]);
+        // A name the user chose stays theirs.
+        assert!(multi_candidates(&two_agent_snapshot("dream-test"), &Map::new()).is_empty());
+        // Our own name is renamed only when the session titles changed.
+        let owned = json(r#"{"w1:t9": {"identity": ["multi"], "title": "Login work", "llm_sig": "Add tests\nFix login"}}"#);
+        let Value::Dict(owned) = owned else { unreachable!() };
+        assert!(multi_candidates(&two_agent_snapshot("Login work"), &owned).is_empty());
+        let stale = json(r#"{"w1:t9": {"identity": ["multi"], "title": "Login work", "llm_sig": "Fix login"}}"#);
+        let Value::Dict(stale) = stale else { unreachable!() };
+        assert_eq!(multi_candidates(&two_agent_snapshot("Login work"), &stale).len(), 1);
+        // Hand-renamed after we wrote it: yielded, never touched again.
+        let yielded = json(r#"{"w1:t9": {"yielded": true}}"#);
+        let Value::Dict(yielded) = yielded else { unreachable!() };
+        assert!(multi_candidates(&two_agent_snapshot("1"), &yielded).is_empty());
     }
 }

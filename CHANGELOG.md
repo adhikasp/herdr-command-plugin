@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.0
+
+- Tabs holding two or more agents can be named by one OpenRouter request over
+  their session titles. Opt in with `"multi_agent_titles": true`; the model is
+  `llm_model` (default `openai/gpt-6-luna`) and the key comes from
+  `OPENROUTER_API_KEY` or an `OPENROUTER_API_KEY=` line in `llm_env_file`. The
+  request runs on a worker thread, is repeated only when the set of session
+  titles changes (at most once a minute per tab), and never renames a tab you
+  named yourself.
+
 ## 0.17.0
 
 - Saved SSH machines are no longer polled every 4 seconds. The machines process
